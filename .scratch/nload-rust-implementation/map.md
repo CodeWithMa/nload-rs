@@ -26,6 +26,7 @@ A working Linux `nload-rs` application satisfying [Minimal Rust port of nload â€
 <!-- One named link and short outcome per resolved child. Implementation evidence and detailed resolutions live in the tickets and their linked assets. -->
 
 - [Establish the Rust project and delivery foundation](issues/01-project-foundation.md#resolution--2026-10-02--alice): Edition-2024 Cargo foundation, required locked baselines and GPL delivery files verified; foundation checks pass, with application acceptance still pending.
+- [Implement arguments, proc snapshots and startup ordering](issues/02-arguments-proc-startup.md#resolution--2026-10-02--alice): Strict raw-byte invocation, complete proc snapshots and natural startup selection implemented; 13 deterministic tests and locked build pass, with monitor/application integration evidence pending.
 
 ## Not yet specified
 

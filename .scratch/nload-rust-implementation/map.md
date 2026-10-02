@@ -1,6 +1,6 @@
 # Implement and verify the minimal Rust port of nload
 
-Status: open
+Status: closed
 Labels: wayfinder:map
 Assignee:
 
@@ -34,11 +34,11 @@ A working Linux `nload-rs` application satisfying [Minimal Rust port of nload â€
 - [Integrate startup, sampling and the interactive application loop](issues/07-application-integration.md#resolution--2026-10-02--alice): Working binary, guarded startup and shutdown-first anchored sampling/redraw loop integrated; 18 new fixtures and all 93 tests/build gates pass, unblocking product PTY verification.
 - [Verify the real binary through automated Linux PTY checks](issues/08-linux-pty.md#resolution--2026-10-02--alice): Eleven real-product PTY checks pass against debug/release, covering retained OS-state restoration and practical faults; all 104 tests/build gates pass, unblocking recorded emulator/live smoke.
 - [Record emulator behavior and nonprivileged live traffic smoke](issues/09-emulator-live-smoke.md#resolution--2026-10-02--alice): Human Alacritty observations pass layout/navigation/small-mode history recovery and q/Ctrl+C/SIGTERM visual cleanup; nonprivileged live traffic passes, unblocking final acceptance audit.
+- [Audit final acceptance evidence and the implementation handoff](issues/10-final-acceptance.md#resolution--2026-10-02--alice): All 52 acceptance cases, final 104-test/build gates and artifact reviews pass; verified handoff recorded, committed lockfile confirmed and destination complete with a documentation-only uncommitted delta.
 
 ## Not yet specified
 
-- Integration and real-FD verification may expose concrete interactions among shutdown, partially emitted output, signal wakeups and staged restoration. The contracts are settled; any newly revealed corrective work should become a precise child ticket when evidence makes it specifiable.
-- The final acceptance review may reveal uncovered contractual details or environment-specific gaps. Graduate concrete gaps into tickets rather than weakening acceptance or assuming a pass.
+None. The destination is complete; the final acceptance resolution indexes the coverage and handoff evidence.
 
 ## Out of scope
 

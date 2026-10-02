@@ -986,47 +986,221 @@ These observations also supply the visual aspects referenced by A11, V01 and
 T09. They do not replace earlier exact deterministic/PTY evidence. Final
 build/artifact/revision acceptance remains pending.
 
+## Final acceptance audit — 2026-10-02
+
+Scope: [Audit final acceptance evidence and the implementation handoff](issues/10-final-acceptance.md).
+Delivery asset: [Verified nload-rs implementation handoff](handoff.md).
+
+### Final revision and environment
+
+- Repository revision: **`1e3a2da49002cbf054199d635ee54c239701a5e0`**,
+  `docs: record emulator and live traffic smoke verification`.
+  Worktree was clean before the claim. All application source/tests, Cargo
+  manifest/lockfile and license artifacts are committed and unchanged.
+- `git diff --exit-code c018e0279a66df8121195a449bcd0f63c03496ee -- src tests
+  Cargo.toml Cargo.lock LICENSE THIRD-PARTY-NOTICES.md .gitignore` passes with
+  empty output: the exact earlier PTY/emulator/live-tested implementation remains.
+- `HEAD:src` tree: `9601a8fd68b559eaf56d14092b29ca9c7f31aefa`;
+  `HEAD:tests` tree: `62614b9034df2191cabaa9f6e7f4b908e7f6ea1a`;
+  `HEAD:Cargo.lock` blob: `6c20db73822e4f0fbc6b6adac4d97c78d8f4f5e9`.
+- `git ls-files --error-unmatch Cargo.lock` passes; its last-changing commit is
+  `1977703de7d9321c92545ad6fc864c2099e2dc50` (`feat: establish Rust project foundation`).
+  No lockfile diff exists. The specification's committed-lockfile condition is
+  satisfied; foundation-era requests for a future lockfile commit are historical.
+- Final uncommitted delta is documentation only: `README.md`,
+  `.scratch/nload-rust-implementation/{handoff.md,verification.md,map.md}` and
+  `.scratch/nload-rust-implementation/issues/10-final-acceptance.md`.
+  No source/test/dependency/license modification, staging or commit was made.
+  Earlier mentions of an outstanding authorized final revision do not introduce
+  an extra acceptance requirement: the implementation and lockfile already have
+  the committed revision above, with this documentation delta explicitly recorded.
+- rustc **1.98.1** (`48a229ceaefd4985c50990b14116b6d856af0985`, commit date
+  2026-09-01, built from a source tarball), host/target
+  **x86_64-unknown-linux-gnu**, LLVM **21.1.8**. Cargo **1.98.0**
+  (`797e8a9bca276c1c9f9f738d2a20f484fa4eea9d`, commit date 2026-08-05);
+  rustfmt **1.9.0**. Verbose tool output matches the foundation record above.
+  Sysroot: `/nix/store/xvp6nfxayb07si2jaggqwvx3iykw89g2-rustc-1.98.1`.
+- OS **NixOS 26.11.0 (zokor)**, x86_64, kernel:
+  `Linux nixos-dev 7.2.8 #1-NixOS SMP PREEMPT_DYNAMIC Fri Sep 25 14:37:14 UTC 2026 x86_64 GNU/Linux`.
+  UID 1000 (`alice`), GID 100 (`users`). No administrative privileges used.
+- `CARGO_BUILD_TARGET`, `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, `RUSTC`,
+  `RUSTC_WRAPPER`, `RUSTC_WORKSPACE_WRAPPER`, `RUSTC_BOOTSTRAP`,
+  `CARGO_PROFILE_RELEASE_PANIC`, `CARGO_HOME`, `LC_ALL` and
+  `NLOAD_RS_PTY_BINARY` unset. TERM=`alacritty`, LANG=`en_US.UTF-8`.
+  Agent stdin/stdout/stderr are nonterminal; visual acceptance relies on the
+  recorded human Alacritty exchange, not these environment declarations.
+
+### Final commands and binary continuity
+
+All commands ran from the repository root, on the final unchanged application.
+
+| Command/check | Actual outcome |
+| --- | --- |
+| `cargo fmt --check` | Exit 0 |
+| `cargo test --locked` | Exit 0; **93 unit/scripted/native + 11 product PTY = 104 passed**, 0 failed/ignored; unit run 0.17 s, PTY run 2.56 s |
+| `cargo build --release --locked` | Exit 0; optimized directly runnable release executable |
+| `./target/release/nload-rs --version` | Exit 0; exactly `nload-rs 0.1.0` and newline |
+| `cargo metadata --locked --format-version 1 --filter-platform x86_64-unknown-linux-gnu` | Exit 0; actual target, identity and Linux feature/dependency graph reviewed |
+| `cargo metadata --locked --format-version 1` | Exit 0; all locked package licenses/features reviewed |
+| `cargo tree --locked --target x86_64-unknown-linux-gnu -e features` | Exit 0; four Linux third-party packages, graph below |
+| `cargo tree --locked --target all -e features` | Exit 0; two additional Windows-only packages accounted for |
+| `git diff --check` | Exit 0; no whitespace diagnostics |
+
+Cargo reports the existing single `dead_code` warning for Session's `dimensions`
+and `notifications` convenience methods (`src/terminal/session.rs:132,136`).
+Production accesses those effects through Runtime; their native/scripted checks
+pass. This warning is not a failing acceptance gate and requires no behavioral
+change for handoff.
+
+Rechecked SHA-256 identities:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `target/debug/nload-rs` | `85bd4b33c958adcc57aedb604a046eae2fefb99b61c18b3abe576ffa40a56b1f` |
+| `target/release/nload-rs` | `7ad245c475a9a29c3abac31b8f7e69d8ef6c06b216d20a9cebc21a4fefd998c1` |
+| `Cargo.lock` | `e8fac94754b318f9502bdcf8be89e1fa49b43a2c11453f4aed57159e00ed42ad` |
+| `LICENSE` | `edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6` |
+
+Both binaries match the [product Linux PTY run](#product-linux-pty-run--2026-10-02).
+The release hash also matches the [human emulator/live record](#recorded-emulator-and-live-smoke--2026-10-02).
+The final full test gate freshly reruns all 11 product checks against debug;
+the earlier direct-release PTY run and human direct-release execution remain
+valid on the identical release binary. Documentation edits invalidate no
+behavioral evidence, so no emulator/live repetition is required.
+
+### Sections 1–11 and coverage audit
+
+Each of the **52 cases** (12 A, 13 S, 8 V, 14 T, 5 D) was checked against the
+exact passing names in the earlier module/application/PTY tables and final test
+output, plus the actual emulator/live observations. The ledger below is the
+final evidence index; earlier pending/intermediate statements remain historical
+snapshots, not open requirements or inferred passes.
+
+| Specification section | Source/artifact and passing evidence reviewed |
+| --- | --- |
+| 1 — Scope/identity/reference | Cargo package/bin identity, `args_os` main and private modules; A01 and D03 review; retained reference facts traced to the pinned [nload release findings](../nload-rust-port/research/release-defaults.md), with D05 departures below |
+| 2 — CLI/startup | `arguments.rs`, `proc_sampler.rs`, `application.rs`; [argument/proc named fixtures](#arguments-and-proc-run--2026-10-02) and [application named fixtures](#application-integration-run--2026-10-02) cover A01–A10, streams/status/no-effects, ceilings, complete discovery and completion-anchored baseline reuse |
+| 3 — Membership/navigation/lifecycle | Fixed Monitor entries, raw byte selection/order and observe-only outcome lookup; A04/A09/A11/A12 module/application tests, product fragmented arrows, and actual human all-four-arrow selection/wrapping |
+| 4 — Acquisition/timing/statistics/history | Fresh bulk EOF acquisition, checked u64 counters/deltas and integer endpoints, exact overlap windows, paired resets and borrowed histories; [monitor named fixtures](#monitor-run--2026-10-02) S01–S12 plus application cadence/failure/backpressure and native BOOTTIME/timerfd/conversion fixtures for S06/S07/S13 |
+| 5 — Screen/formatting | Pure `screen.rs` selected-view-to-rows contract; all [screen named fixtures](#screen-run--2026-10-02) V01–V08/S12 pass exact geometry/glyph/state/escape/overflow/unit/rounding tests; V05 product small-size checks and actual Alacritty growth/history observations pass |
+| 6 — Terminal/input/scheduling | Session support/raw/notification ownership, constant-memory decoder, single-frame resumable output and thin application checkpoints; [session](#terminal-session-run--2026-10-02), [runtime](#terminal-runtime-run--2026-10-02) and application T01–T08 exact tests, real PTY/native effects and handler review pass |
+| 7 — Failures/cleanup/status | `guarded`, staged exhaustive Session cleanup, prior-hook restoration and normal ExitCode return; T09–T13 session/application fixtures pass, practical real setup/EOF/hangup/backpressure tests pass, human visible q/Ctrl+C/SIGTERM cleanup passes; no early `process::exit` |
+| 8 — Ownership/seams | Five private deep boundaries plus application orchestration; selected view hides intervals/reset state, screen returns owned ASCII rows, production/scripted counter/clock/terminal effects exist; final D02 review below |
+| 9 — Dependency/license/delivery | Actual manifest, lock, filtered/all-target metadata/trees, downloaded MIT texts, GPL v2, exact README credit/build commands and committed lockfile; final gates and D01–D03 review below |
+| 10 — Acceptance | All named unit/native/scripted/product PTY tests freshly pass; required evidence types checked per case, with actual human E/L record retained and explicit practical fault limitations rather than invented successes |
+| 11 — Departures/supersessions | Every departure row checked against implementation/tests; ceiling-option expansion and show-cursor/TERM/signal/cleanup arbitration amendments implemented consistently, with no superseded promise left open |
+
+### Final build/artifact reviews
+
+- **A01 B / D03:** metadata reports one product binary named `nload-rs`, version
+  `0.1.0`, edition 2024, no public library target. `arguments::version_text`
+  uses `CARGO_PKG_NAME`/`CARGO_PKG_VERSION`; Cargo.toml remains the sole version
+  authority. Final direct version output and exact deterministic/PTY comparisons
+  pass. README has the exact agreed credit:
+  `Inspired by [nload](https://github.com/rolandriegel/nload) by Roland Riegel.`
+  It documents all required commands, invocation/controls, compiler/target,
+  binary-scaled ceilings, license/notices and passing verification/handoff.
+- **A07 B:** arguments/defaults and startup source have no HOME/config access;
+  proc/TERM are the concrete runtime inputs. Earlier same-startup fixtures under
+  set/unset HOME and differing locales pass. No upstream config read/write occurs.
+- **S06/S13 B:** production owns a CLOCK_BOOTTIME timerfd; every statistical
+  timestamp/denominator comes from checked BOOTTIME nanoseconds at acquisition
+  completion, with no wall-clock/Instant fallback. Session's Instant usage is
+  solely a finite cleanup-write budget. One proc traversal serves every retained
+  interface per round, including off-screen entries; expiry is observation-only.
+- **T06/T12 B:** actual signal-hook flag and Unix-pipe actions register before
+  mutation; flags precede wakes and inspection drains before atomics. Handlers
+  do no application drawing/cleanup/allocation and bytes carry no identity.
+  The quiet temporary hook/catch guard surrounds startup/execution, cleanup
+  precedes stderr reporting, the prior hook is restored, and main returns ExitCode.
+- **D01:** all final required gates pass with recorded stable compiler/target and
+  already committed unchanged lockfile. A future commit of this documentation
+  is not substituted for or needed to satisfy the already-met lockfile condition.
+- **D02:** Arguments owns pure grammar/text; Proc sampler owns validated bulk
+  snapshots; Monitor owns membership/state/exact intervals/extrema/history;
+  Screen owns ASCII geometry/formatting; Terminal/runtime owns FDs/signals/clock/
+  input/frames/restoration. Application owns startup and deadlines/redraw requests.
+  Production ProcSampler/LinuxClock/LinuxTerminal/LinuxRuntime and scripted
+  counter/clock/terminal adapters exercise the same orchestration. Safe module
+  fixtures observe views/rows/events/effects rather than monitor private queues.
+  All production unsafe is confined to `terminal/linux.rs` and
+  `terminal/linux/runtime.rs`; native adapter/PTY harness unsafe is test-only.
+  No application thread, iterator, async runtime, terminal framework or parser
+  dependency was introduced.
+- **D02 dependency graph:** exact libc **0.2.189** (`default,std`), signal-hook
+  **0.4.4** (no enabled features), signal-hook-registry **1.4.8** (no features),
+  errno **0.3.14** (`default,std`) on Linux. Cross-target lock additionally has
+  windows-sys **0.61.2** (`default,Win32,Win32_Foundation,Win32_System,
+  Win32_System_Diagnostics,Win32_System_Diagnostics_Debug`) and windows-link
+  **0.2.1** (no features), solely through errno's Windows edge. Neither builds
+  for the verified Linux target. No signal-hook channel/iterator/cc feature is
+  enabled; no extra third-party package is resolved.
+- **D02/D03 licenses:** all six actual downloaded MIT files were re-read and
+  compared with `THIRD-PARTY-NOTICES.md`; copyright/permission/disclaimer texts
+  are preserved. All declare MIT OR Apache-2.0; the selected MIT routes remain
+  compatible with GPL-2.0-only. LICENSE contains the complete GNU GPL version 2
+  text (terms 0–12 and generic application appendix); application metadata,
+  README and source SPDX explicitly grant GPL-2.0-only, not a later-version grant
+  from the appendix's example. `.gitignore` excludes `/target/`, not Cargo.lock.
+- **D05 reference/departures:** retained stacked incoming/outgoing display,
+  Curr/Avg/Min/Max/Ttl order, binary units, independent 10240 ceilings, nominal
+  500-ms cadence, all-interface single-view discovery and arrows/quit match the
+  source-backed reference. Natural order/exact selection/no config, symmetric
+  prompt navigation/no aliases, BOOTTIME/actual fractional windows/paired resets,
+  true five-minute off-screen history/no synthetic columns, strict checked flags/
+  explicit rounding/widened totals, Interface/no-IP/status/small screen, and owned
+  Linux terminal/status/cleanup identity all follow accepted departures. Tests
+  prove ceilings are permitted alongside selection despite the earlier startup
+  ticket's narrower scope; cleanup shows the cursor instead of promising unknown
+  prior visibility, rejects the specified TERM values, prefers pending INT to
+  TERM and preserves chosen signal/failure statuses on cleanup errors.
+
+**Outcome:** all required D/P/E/L/B evidence and delivery conditions pass.
+No concrete coverage, implementation or environment gap surfaced; no new child
+ticket is needed. Both map fog entries were revisited: integration/FD behavior
+and final contractual coverage are now fully resolved by the linked evidence.
+All prerequisite children are closed; final acceptance closes the sole remaining
+child and the parent map. Documentation whitespace/link/metadata checks accompany
+this handoff; no unperformed observation is counted as passing.
+
 ## Acceptance case ledger
 
-These are section 10 case identifiers, not issue references. Each future evidence
-entry must give actual test names or recorded manual observations, not an intended
-implementation. Deterministic evidence now passes for the integrated application;
-practical product PTY and human emulator/live checks pass. Final build/artifact-review
-obligations stay explicit.
-The parent effort's acceptance remains open.
+These are section 10 case identifiers, not issue references. Exact passing test
+names and actual manual observations live in the module/application/PTY/emulator
+tables above. The [final audit](#final-acceptance-audit--2026-10-02) verifies all
+required evidence types and delivery conditions. All cases pass; historical
+intermediate pending statements above do not describe final acceptance.
 
 | Cases | Latest status | Evidence / remaining work |
 | --- | --- | --- |
-| A01–A03 | D passes; A01 final B review pending | Module text/grammar and application streams/status/zero-effect fixtures pass; redirected release help/version/invalid invocation checks also pass |
+| A01–A03 | D passes; A01 B passes | Module text/grammar and application streams/status/zero-effect fixtures pass; redirected release help/version/invalid invocation checks and final identity/version review pass |
 | A04–A06 | D passes | Raw selection/full membership, before/after-name options, independent/global ceilings, limits/repetition/zero and grammar/no-effect dispatch pass |
-| A07 | D passes; final B review pending | Application startup fixture passes under set/unset HOME and differing locale; source contains no configuration access |
+| A07 | D/B pass | Application startup fixture passes under set/unset HOME and differing locale; final source review confirms no configuration access |
 | A08–A10 | D passes | Distinct discovery/selection/clock failures, natural ordering, exact effect order, baseline reuse/completion timestamp and long-initialization anchored deadline fixtures pass |
 | A11 | D passes; T03 real input and T14 visual pass | Symmetric arrows/wrapping/singleton, aliases ignored, zero acquisition/sample/reset effects and prompt redraw fixtures pass; fragmented/repeated product CSI/SS3 input and human all-four-arrow navigation pass |
 | A12 | D passes | Module and loop removal/rename/addition/failure/return cases retain membership/selection and reset to baseline without bridging gaps |
 | S01–S05 | D passes | Complete proc/EOF/fresh traversal and exact numerical fixtures above, with quiet nonfatal failure/absence behavior connected in the application |
-| S06–S07 | D passes; S06 final B review pending | Actual intervals/nonpositive observations, BOOTTIME/timerfd native checks, anchored completion deadlines/missed slots, one delayed sample and first-future checked arithmetic pass |
+| S06–S07 | D passes; S06 B passes | Actual intervals/nonpositive observations, BOOTTIME/timerfd native checks, anchored completion deadlines/missed slots, one delayed sample and first-future checked arithmetic pass; production clock/denominator review passes |
 | S08–S12 | D passes | Exact deltas/extrema/resets/off-screen history/boundary expiry/resize rendering pass; loop also preserves actual history through small-mode sampling/navigation/growth |
-| S13 | D and intermediate B review pass; final B review pending | Owned BOOTTIME/timerfd and checked conversions/effect faults, bulk traversal and application completion timestamps pass |
+| S13 | D/B pass | Owned BOOTTIME/timerfd and checked conversions/effect faults, bulk traversal, application completion timestamps and final unsafe/backend review pass |
 | V01–V04, V06–V08 | D passes; V01 visual evidence passes in T14 | Exact pure screen geometry/bar/state/name/overflow/unit/rounding/large-value fixtures pass and rows are connected to runtime frames; human confirms stacked layout/fields/labels |
 | V05 | D/P/E pass | Exact scripted history recovery and product bounded rows pass; human confirms real small startup/sampling/navigation/quit and visible shrink/grow/history recovery |
 | T01–T04 | D/P pass | Real product support rejection/informational exemptions, raw mode/shared OFD flags, typed controls, fragmented/repeated arrows and ignored sequences pass against debug/release |
 | T05 | D passes | Exact idle/buffering module fixtures and integrated parser wait/timeout-without-acquisition pass |
-| T06 | D/P and intermediate B review pass; final B pending | Product external signals, queued INT/TERM arbitration and backpressured shutdown pass; private full-pipe/drain semantics backed by native/scripted evidence |
+| T06 | D/P/B pass | Product external signals, queued INT/TERM arbitration and backpressured shutdown pass; private full-pipe/drain semantics backed by native/scripted evidence and final handler review |
 | T07–T08 | D passes | Bounded batches, due-before-next-input fairness, shutdown priority, coalesced dirty redraw, untouched replacement/partial resumption and continuing actual acquisitions under EAGAIN pass |
 | T09–T11 | D and practical product P pass | Debug/release normal exits and retained OS/protocol restoration, real setup EBADF/EAGAIN, EOF and independent hangups pass; stage/short-write/clock-fault limitations explicitly mapped above |
-| T12–T13 | D passes; T12 final B review pending | Application startup/runtime panics use guarded cleanup; prior hook restored/nonpanicking fallback verified; actual loop exits with multiple cleanup failures choose/preserve required statuses |
+| T12–T13 | D passes; T12 B passes | Application startup/runtime panics use guarded cleanup; prior hook restored/nonpanicking fallback verified; actual loop exits with multiple cleanup failures choose/preserve required statuses; final guard/ExitCode review passes |
 | T14 | E passes | Alacritty 0.17.0 human observations confirm layout/prompt navigation/history recovery and prior-screen/visible-cursor/typing restoration after q/Ctrl+C/SIGTERM with statuses 0/130/143 |
-| D01 | Pending (intermediate commands pass) | Final application gates and authorized repository handoff still required; exact compiler/commands recorded above |
-| D02 | Intermediate review passes; final B review pending | Graph/licenses, five deep modules and application connections, production/scripted effect seams, pure views/rows and adapter-only unsafe reviewed |
-| D03 | Intermediate files reviewed; final B review pending | Working invocation/controls/build docs, Cargo-derived identity/version, license, credit, compiler and committed Cargo.lock established; final artifact/revision review required |
+| D01 | B passes | Final fmt/test/release gates pass on recorded revision/compiler/target; unchanged Cargo.lock already committed |
+| D02 | B passes | Final actual graph/features/MIT texts/notices, five deep modules and application connections, production/scripted effect seams, pure views/rows and adapter-only unsafe reviewed |
+| D03 | B passes | Final Cargo-derived identity/version, GPL v2/GPL-2.0-only grant, exact credit, documented locked build/direct use, compiler record and committed lockfile pass artifact review; linked verified handoff records docs-only delta |
 | D04 | L passes | Human direct-release discovery/explicit selection/navigation, independent 20.00/5.00 MBit/s ceilings and actual nonprivileged loopback traffic with advancing totals/rates/graphs recorded above |
-| D05 | Pending | Final implemented reference/departure and supersession review required |
+| D05 | B passes | Every retained/reference/departure row and both cross-ticket amendments audited against final source/tests; no unresolved superseded promise |
 
 ## Outstanding verification
 
-- Final deterministic coverage/artifact review against every specification section;
-  current module and application mappings/checks pass as recorded above.
-- Final source/artifact review, required command gates and authorized final
-  implementation revision. Cargo.lock is already committed in the foundation;
-  the intermediate results alone do not satisfy
-  the parent map's destination.
+None for this destination. All 52 acceptance cases and specification sections
+1–11 have passing required evidence. The final documentation-only delta is
+uncommitted as recorded above; the application implementation and required
+lockfile are already committed. No new commit was made by this audit.

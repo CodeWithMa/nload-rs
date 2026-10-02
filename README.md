@@ -10,7 +10,8 @@ The application runs a single-interface view with incoming/outgoing graphs,
 traffic statistics and arrow-key navigation through the startup interface list.
 Deterministic module/application-loop checks, automated Linux product PTY checks,
 recorded Alacritty emulator observations and nonprivileged live traffic smoke
-pass. Final acceptance gates and artifact review are the next verification step.
+pass. Final acceptance gates and the specification/artifact audit also pass;
+see the [verified implementation handoff](.scratch/nload-rust-implementation/handoff.md).
 
 ## Build and run
 
@@ -42,7 +43,7 @@ kBit/s; each defaults to 10240, and zero restores that direction's default.
 ```
 
 Help/version work with redirected streams. Interactive and live evidence is
-recorded as verification progresses. Repeatable builds use the recorded compiler
+linked from the verification record. Repeatable builds use the recorded compiler
 and locked dependencies; byte-identical executable output is not promised.
 
 On Linux, `cargo test --locked` also runs the real binary through owned PTYs;

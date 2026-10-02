@@ -244,6 +244,102 @@ use the private I/O seam called by the production adapter.
   and [Integrate startup, sampling and the interactive application loop](issues/07-application-integration.md).
   No specification conflict, newly specifiable fog or corrective ticket surfaced.
 
+## Monitor run — 2026-10-02
+
+Scope: [Implement the pure monitor and statistics runs](issues/03-monitor-statistics.md).
+Caller contracts: [Monitor and selected-view interface](monitor-interfaces.md).
+
+### Revision, environment and commands
+
+- Base revision: `5495d069a1c99f66c81d5f4927cc04d64afa8e09`; the worktree was
+  clean before the ticket claim. Tested source is the uncommitted implementation
+  and fixtures in `src/monitor.rs` on this base. No commit was made.
+- `rustc --version --verbose` reconfirmed **1.98.1**, commit
+  `48a229ceaefd4985c50990b14116b6d856af0985`, host
+  `x86_64-unknown-linux-gnu`, LLVM 21.1.8. `cargo --version --verbose`
+  reconfirmed **1.98.0**, commit
+  `797e8a9bca276c1c9f9f738d2a20f484fa4eea9d`, NixOS 26.11.0.
+  No manifest, dependency, lockfile or other application-module changes were made.
+- All commands ran at the repository root; no real-time sleeps, clock I/O or
+  private interval/reset assertions are used by monitor tests.
+
+| Command | Actual outcome |
+| --- | --- |
+| `cargo fmt && cargo test --locked monitor::tests` (initial run) | Formatting exit 0; focused tests exit 101, 13 passed/2 failed. Two fixture expectations were corrected as explained below. |
+| `cargo test --locked monitor::tests` (after corrections) | Exit 0; **15 passed**, 0 failed; 13 unrelated tests filtered out |
+| `cargo fmt --check` | Exit 0 |
+| `cargo test --locked` | Exit 0; **28 passed**, 0 failed/ignored |
+| `cargo build --release --locked` | Exit 0; 45 `dead_code` warnings for implemented interfaces awaiting application wiring |
+| `git diff --check` | Exit 0; no tracked-file whitespace diagnostics |
+
+The initial failures were test expectations, not production changes: after a
+complete forward cycle from the middle entry, the first backward step selects
+the first entry; and zero delta in a tiny interval does not erase earlier traffic
+still inside the current one-second window. The retention fixture now creates
+genuinely measured-zero history with zero counters throughout that warm-up.
+The passing final commands above ran after those corrections. The entry point
+still awaits integration, so direct UI/PTY/emulator/live acceptance was not run
+or claimed for this pure module.
+
+### Deterministic case-to-test evidence
+
+All tests below are in `monitor::tests`; names are actual passing tests. They
+construct/observe/navigate/read through the same Monitor interface available to
+the application. Assertions use selected-view fields and exposed graph samples,
+never private interval queues. Derived comparisons use the specification's
+`1e-9 * max(1, abs(expected))` tolerance; exact totals/timestamps/state/counts
+and unrounded extrema identities are also checked where applicable.
+
+| Passing test | Applicable cases and observations |
+| --- | --- |
+| `warm_up_exposes_exact_totals_and_independent_directional_rates` | S03: baseline totals/no column, numerical 200→400 RX warm-up, independent TX, run extrema, latest cumulative rather than session total and exact column timestamps |
+| `partial_current_window_weights_only_interval_overlap` | S04: partial current example 350, average 320; independent paired TX example |
+| `exact_and_partial_average_boundaries_preserve_crossing_intervals` | S05: exact 302-second example and partial-average 303 example; both directions and current rates using actual long intervals |
+| `delayed_and_suspend_length_intervals_use_actual_elapsed_time_once` | S06/S07 monitor portions: 3,000 bytes over three seconds yields 1,000 bytes/s and one column; a 600-second interval uses actual elapsed duration and one surviving column, not catch-up samples |
+| `nonpositive_times_ignore_entire_outcomes_without_advancing_any_view` | S06: equal/earlier times ignored at baseline, measured and unavailable states; lower counters/failure/absence ignored without changing views; next valid interval still uses last accepted endpoints/counters |
+| `exact_small_deltas_and_nanosecond_differences_survive_large_values` | S08/S06: counters/times above f64 integer precision near u64 maximum preserve one-byte/one-nanosecond differences; exact maximum totals and timestamps remain available |
+| `full_u64_interval_delta_is_checked_before_derived_conversion` | S08: zero→maximum-u64 delta remains valid without signed narrowing or integer intermediate overflow; exact independent totals |
+| `unrounded_run_extrema_survive_average_expiry_and_measured_idle` | S08: currents differing below display precision retain distinct extrema; minimum survives five-minute expiry, then measured idle sets genuine zero minimum/column; TX extrema independent |
+| `decrease_in_either_counter_resets_both_directions_to_new_baseline` | S09: RX 4,000,000,000→10,000 with increasing TX, and independent TX decrease variant, reset both rates/extrema/histories; next RX +500/0.5s yields 1,000 and one column |
+| `absence_and_read_failure_hide_totals_and_never_bridge_return_gaps` | S10/S02: each unavailable reason clears both directions with no stale totals; repeated failure followed by higher counters is baseline only, then a fresh independent measured interval |
+| `initial_unavailable_outcomes_and_reason_changes_remain_explicit` | S10: unavailable baseline outcomes, reason changes and successful recovery retain distinct states for every entry |
+| `navigation_wraps_symmetrically_preserving_views_and_global_ceilings` | A11/A05/S08: initial middle selection, forward/reverse wraps and singleton no-op; every selected view survives navigation unchanged; raw names, one-based position/count, independent ceilings across entries and uncapped numeric rates |
+| `snapshot_lifecycle_retains_raw_membership_selection_and_retries_all_names` | A12/S02/S10: actual validated snapshot lookup for A/B, raw-name removal/rename/C addition, every original name retried, selected unavailable A retained/navigable, global parse failure clears both entries, higher-count return is baseline; fixed count/identities maintained |
+| `never_selected_interfaces_accumulate_real_history_at_every_round` | S11/A11: never-selected B has independent statistics and actual timestamped 200/300/1,000 samples over regular/delayed rounds; selecting/leaving/reselecting adds no columns or resets |
+| `history_expiry_retains_exact_boundary_and_reads_only_hide_fitting_suffixes` | S12 monitor portion: before/exactly/after `t−300` at nanosecond resolution, boundary retained then expired by next observation; >50-column history, real zero sample, caller suffix fits for widths 50/1/0/400 and unchanged views across reads/shrink/grow |
+
+### Module review and remaining integration evidence
+
+- Monitor contains no I/O, clock reads, dimensions, formatting, diagnostics or
+  unsafe code. Fixed original-byte entries and startup selection are consumed
+  once. The narrow outcome lookup visits retained names only; it does not acquire
+  counters, expose membership mutation or require a second discovery snapshot.
+- Run intervals retain exact paired u64 deltas and integer endpoints. Deltas are
+  checked before conversion; endpoint differences are calculated before f64
+  conversion. Only positive rounds reach calculation. Average pruning retains
+  crossing intervals; graph pruning retains exact-boundary samples. Statistics
+  and graph samples remain unrounded/uncapped; extrema span the whole run.
+- Baseline and both unavailable states enforce paired totals/rates/history
+  invariants. Both-direction reset and no-gap bridging are verified for decreases,
+  failures and absence. Navigation and read-only borrowed views cannot acquire or
+  expire samples. Source review and passing fixture comparisons cover these
+  module responsibilities of specification sections 3, 4 and 8.
+- A11 still needs decoded all-four-arrow/ignored-alias events and prompt requested
+  redraw with zero adapter acquisitions in runtime/integration, plus T03/T14
+  real input/visual evidence. A12 still needs application-loop lifecycle use;
+  fixed-list transitions themselves have passing combined snapshot/monitor fixtures.
+- S02 still needs nonfatal application continuation/quiet stderr evidence. S06
+  clock semantics/wall-clock/failure/conversion and S07 deadline anchoring,
+  timerfd/missed-slot behavior remain runtime/integration checks. The pure monitor
+  accepts explicit u64 nanoseconds; suspend-length interval fixtures do not prove
+  production BOOTTIME ownership. S13 is still pending for clock/timerfd effects.
+- S12 fitting/read invariance is verified at the monitor interface; actual
+  shrink/grow screen-row rendering and oldest-left/newest-right placement remain
+  with Screen (S12/V03/V05). No rendering test is claimed by this ticket.
+- No specification conflict or newly specifiable corrective work surfaced. Those
+  remaining checks already belong to existing screen, runtime/integration and
+  final-acceptance tickets; the map's fog does not change.
+
 ## Acceptance case ledger
 
 These are section 10 case identifiers, not issue references. Each future evidence
@@ -253,19 +349,24 @@ implementation. **No complete acceptance case is marked passing yet.**
 | Cases | Latest status | Evidence / remaining work |
 | --- | --- | --- |
 | A01–A03 | Partial (module checks pass) | Informational outcomes/text and strict grammar tests mapped above; application streams/status/no-effect tests pending |
-| A04–A06 | Partial (module checks pass) | Raw names, selection, independent ceilings and range/grammar tests above; application dispatch/no-effects and navigation scope pending |
+| A04–A06 | Partial (module checks pass) | Raw names, selection, independent ceilings and range/grammar tests above; monitor confirms global independent ceilings after navigation and uncapped rates; application dispatch/no-effects pending |
 | A07 | Partial (module checks/review pass) | Pure defaults/selection tests pass with set/unset HOME; no configuration I/O in these modules; complete application view/artifact review pending |
-| A08–A09 | Partial (module checks pass) | Complete snapshot errors versus empty/missing selection; natural raw-byte order/long digit/locale tests pass; application dispatch/lifetime membership pending |
-| A10–A11 | Pending | Startup effect ordering/baseline deadlines and monitor/navigation behavior not implemented |
-| A12 | Partial (acquisition checks pass) | Retained-name removal/rename/addition/return outcomes pass; monitor new-run/selection/navigation behavior pending |
+| A08–A09 | Partial (module checks pass) | Complete snapshot errors versus empty/missing selection; natural raw-byte order/long digit/locale and fixed monitor membership pass; application dispatch/use pending |
+| A10 | Pending | Startup effect ordering and clock/deadline anchoring pending; Monitor supports discovery-data baselines without redundant acquisition |
+| A11 | Partial (monitor checks pass) | Symmetric forward/backward wrapping, singleton, view/history/statistics invariance pass; decoded arrows/ignored aliases/prompt redraw and no-effect loop assertions pending |
+| A12 | Module fixtures pass; application use pending | Combined snapshot/monitor raw-name removal/rename/additions/return, fixed membership/selection, navigable unavailability and new-run baseline checks pass |
 | S01 | Module checks pass; final application use pending | Whole-snapshot raw/max-u64/field tests, large chunked EOF/fresh acquisition tests and production reopen review above |
-| S02 | Partial (acquisition checks pass) | Global read/parse failure versus valid absence and retry pass; monitor reset and nonfatal quiet UI behavior pending |
-| S03–S13 | Pending | BOOTTIME/scheduling, statistics, resets and history tests remain with monitor/runtime/integration |
+| S02 | Partial (acquisition/monitor checks pass) | Global read/parse failure versus valid absence, paired reset, unavailable totals and baseline return pass; nonfatal quiet application continuation pending |
+| S03–S05 | Module checks pass; final application use pending | Warm-up/totals/independent directions and exact/partial current/average numerical examples pass |
+| S06–S07 | Partial (monitor checks pass) | Explicit nanosecond actual-time intervals, ignored nonpositive rounds and no catch-up graph columns pass; production BOOTTIME, wall-clock independence, clock failures and deadline/timerfd effects pending |
+| S08–S11 | Module checks pass; final application use pending | Exact deltas/totals, unrounded run extrema/idle/window expiry, both counter-decrease resets, failures/return and never-viewed history pass |
+| S12 | Partial (monitor checks pass) | Exact-boundary expiry and retained fitting suffix/read invariance pass; actual screen resize/redraw/placement pending |
+| S13 | Partial (proc shape reviewed) | Bulk traversal already reviewed; production clock/timerfd and conversion/failure fixtures pending |
 | V01–V08 | Pending | Screen geometry, bars, states, resize, names and formatting have no implemented tests yet |
 | T01–T13 | Pending | Scripted terminal/event/integration and Linux PTY evidence not run |
 | T14 | Pending | Recorded emulator identity, visual protocols and handled-exit observations required; TERM declaration is insufficient |
 | D01 | Pending (intermediate commands pass) | Final application gates and authorized repository handoff still required; exact compiler/commands recorded above |
-| D02 | Partial (dependencies and arguments/proc reviewed) | Graph/licenses and implemented arguments/proc contracts, production/scripted counter adapters reviewed; remaining modules/effects and final review pending |
+| D02 | Partial (dependencies and arguments/proc/monitor reviewed) | Graph/licenses, implemented pure contracts and selected borrowed views, production/scripted counter adapters reviewed; screen/runtime/integration effects and final review pending |
 | D03 | Pending (foundation files reviewed; lockfile committed) | Identity, license, credit, instructions and compiler record reviewed above; Cargo.lock is in base revision 1977703; final artifact/revision review still required |
 | D04 | Pending | No nonprivileged live proc/interface/traffic UI smoke has been run |
 | D05 | Pending | Final implemented reference/departure and supersession review required |

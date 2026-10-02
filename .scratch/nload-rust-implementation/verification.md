@@ -340,6 +340,88 @@ and unrounded extrema identities are also checked where applicable.
   remaining checks already belong to existing screen, runtime/integration and
   final-acceptance tickets; the map's fog does not change.
 
+## Screen run — 2026-10-02
+
+Scope: [Implement the pure ASCII screen and formatting](issues/04-ascii-screen.md).
+Caller contract: [Screen rows interface](screen-interfaces.md).
+
+### Revision, environment and commands
+
+- Base revision: `98aedd7744825774db0090242bbef1bdce381058`; the worktree was
+  clean before claiming the ticket. Tested implementation is the uncommitted
+  renderer and fixtures in `src/screen.rs` on that base. No commit was made.
+- `rustc --version --verbose` reconfirmed **1.98.1**, commit
+  `48a229ceaefd4985c50990b14116b6d856af0985`, host
+  `x86_64-unknown-linux-gnu`, LLVM 21.1.8. `cargo --version --verbose`
+  reconfirmed **1.98.0**, commit
+  `797e8a9bca276c1c9f9f738d2a20f484fa4eea9d`, NixOS 26.11.0.
+  Dependencies, manifest/lockfile and other application modules were unchanged.
+- Commands ran from the repository root. Fixtures use supplied dimensions, views
+  and explicit observation times, with exact row/text/glyph assertions; they have
+  no real-time sleeps, actual terminal I/O or private monitor-queue access.
+
+| Command | Actual outcome |
+| --- | --- |
+| `cargo fmt && cargo test --locked screen::tests` (initial run) | Formatting exit 0; focused tests exit 101, 11 passed/1 failed at the exact 1.70-cell bar threshold |
+| `cargo fmt && cargo test --locked screen::tests` (after scaling correction) | Exit 0; **12 passed**, 0 failed; 28 unrelated tests filtered out |
+| `cargo fmt --check` | Exit 0 |
+| `cargo test --locked` | Exit 0; **40 passed**, 0 failed/ignored |
+| `cargo build --release --locked` | Exit 0; 61 dead-code warnings for modules awaiting application wiring |
+| `git diff --check` | Exit 0; no tracked-file whitespace diagnostics |
+
+The initial threshold failure exposed production arithmetic: calculating
+`10 * (1.7 / 10)` can round below the exact 1.70-cell boundary. Scaling before
+division and comparing in whole-bar coordinates avoids that artifact and the
+separate loss caused by subtracting a cell's integer level. Saturation is explicit.
+The fixture's exact glyph expectations were retained; no epsilon/tolerance was
+introduced. The resize fixture also uses a distinct final pair to detect an
+oldest-prefix/reversed-history bug that a purely periodic pattern would miss.
+The final checks above ran after these changes.
+
+### Deterministic case-to-test evidence
+
+All names below are actual passing tests in `screen::tests`. Render fixtures
+exercise the rows interface with supplied selected views or actual Monitor views.
+Formatting fixtures also check the pure formatting helpers directly, including
+adjacent exact integer totals beyond f64 integer precision.
+
+| Passing test | Applicable cases and observations |
+| --- | --- |
+| `exact_80_by_24_stacked_rows_and_bottom_aligned_fields` | V01/V03: all 24 padded rows compared exactly; 50x10 directional graphs, required label/header/separator rows, rightmost 28-column fields/two-column gaps and field order; half-height/full/saturated columns newest-right and no footer/IP/axis/time text |
+| `minimum_and_odd_geometry_keep_gap_fields_and_outgoing_extra_row` | V01: 60x16, 61x17 and 80x25; exact direction labels/fields/gaps, bottom alignment and outgoing extra row |
+| `fractional_cell_thresholds_are_exact_bottom_up_and_saturating` | V02: both graphs just below/at/above 0.30/0.70/1 at the bottom and next cell; explicit above-ceiling saturation and uncapped numeric current text |
+| `rate_units_choose_prefix_before_explicit_halfway_up_rounding` | V07: zero, 128 bytes/s, exact 0.125 Bit/s halfway, 127.9995 bytes/s pre-rounding boundary, both sides/at all binary prefix boundaries, halfway examples in each prefix and values beyond the G cap |
+| `total_units_round_exact_widened_integers_including_maximum_u64` | V07/V08: exact integer totals, 1024-byte prefix, halfway-up totals, both sides/at every prefix boundary, max-u64 `17179869184.00 GByte` and one-byte-separated large totals straddling a hundredth boundary |
+| `independent_ceiling_labels_and_numeric_prefixes_do_not_cap_rates` | V02/V07/V08: separate 20.00/5.00 MBit/s labels, uncapped numeric 20.00 MBit/s above outgoing ceiling, independently different units in Curr/Avg/Min/Max/Ttl |
+| `largest_exact_totals_and_ceilings_and_overwide_rates_keep_labels` | V06/V08: actual Monitor u64-max deltas/totals over one nanosecond, largest valid incoming ceiling with exact widened bit conversion, independent smallest outgoing ceiling, `[too wide]` for each rate field without losing labels, complete exact total text and saturated graphs |
+| `baseline_absence_failure_idle_and_recovery_have_exact_rows` | V04: actual Monitor baseline/absence/failure/recovery transitions; exact statuses/header/placeholders/totals, empty unavailable graphs and genuine measured idle zeros with normal separator |
+| `raw_names_are_ascii_escaped_shortened_and_keep_position` | V06: NUL/ESC/DEL/non-ASCII bytes escape to uppercase `\xHH`; exact full-size ellipsis/header, no split escape at shortening, tiny-size position preservation and unchanged identity bytes |
+| `small_and_zero_dimensions_show_only_bounded_warning_selection_status` | V05: all states at 59x16/60x15/60x16 and zero/extremely tiny dimensions; exact warning/header/status where fitting, printable bounded ASCII rows and blank remaining warning rows |
+| `fitting_history_resize_and_repeated_redraw_preserve_real_monitor_view` | V03/V05/S12: 70 actual delayed/idle samples, fitting 70/30-column suffixes, short-history right alignment with a measured-zero column, shrink/small/grow/repeated redraw returning identical rows and unchanged complete borrowed view/sample count |
+| `sampling_and_navigation_while_small_reappear_as_actual_history_on_growth` | V03/V05/S11: sample both startup entries while rendering tiny rows, navigate to the never-displayed entry while small, recover its three real columns and actual numeric current on growth without catch-up or redraw-created columns |
+
+### Module review and remaining integration evidence
+
+- Screen's sole caller entry point takes a borrowed selected view and dimensions,
+  returning owned printable ASCII rows. It performs no I/O, unsafe operations,
+  clock reads, monitor mutation, history expiry or terminal protocol output.
+  Graph suffix selection neither pads with samples nor changes their timestamps.
+- Prefix choice precedes rounding. Rates use unrounded f64 bytes/s until bit/unit
+  conversion and explicit positive halfway-up hundredths. Integer totals and
+  ceiling bit conversions use u128 throughout prefix selection and rounding.
+  Maximum legal Monitor-derived rates also fit u128 hundredths at the G cap.
+  Overflow presentation keeps field labels and replaces a complete too-long
+  value; names are escaped/shortened separately from their original identity.
+- The stable rows interface records padding, ownership and zero dimensions.
+  Actual positioning/right-margin behavior, bounded frame output and redraw/input
+  effects remain terminal/application obligations. V05 quit continuity, required
+  Linux PTY and recorded emulator checks are pending; pure rows cannot establish
+  visual no-wrap/cleanup behavior. V01 visual evidence belongs to T14.
+- No specification conflict, new domain term or newly specifiable corrective work
+  surfaced. Existing runtime, integration and acceptance tickets own the remaining
+  evidence. The foundation entry point still awaits wiring, so no direct UI,
+  PTY/emulator or live acceptance run is claimed by this pure-module ticket.
+
 ## Acceptance case ledger
 
 These are section 10 case identifiers, not issue references. Each future evidence
@@ -360,13 +442,14 @@ implementation. **No complete acceptance case is marked passing yet.**
 | S03–S05 | Module checks pass; final application use pending | Warm-up/totals/independent directions and exact/partial current/average numerical examples pass |
 | S06–S07 | Partial (monitor checks pass) | Explicit nanosecond actual-time intervals, ignored nonpositive rounds and no catch-up graph columns pass; production BOOTTIME, wall-clock independence, clock failures and deadline/timerfd effects pending |
 | S08–S11 | Module checks pass; final application use pending | Exact deltas/totals, unrounded run extrema/idle/window expiry, both counter-decrease resets, failures/return and never-viewed history pass |
-| S12 | Partial (monitor checks pass) | Exact-boundary expiry and retained fitting suffix/read invariance pass; actual screen resize/redraw/placement pending |
+| S12 | Monitor/screen module checks pass; application use pending | Exact-boundary expiry, actual fitting history rows, real zero columns, shrink/grow recovery and repeated redraw/view invariance pass; terminal/application resize behavior pending |
 | S13 | Partial (proc shape reviewed) | Bulk traversal already reviewed; production clock/timerfd and conversion/failure fixtures pending |
-| V01–V08 | Pending | Screen geometry, bars, states, resize, names and formatting have no implemented tests yet |
+| V01–V04, V06–V08 | Screen module checks pass; final application use pending | Exact geometry/bar/state/name/overflow/unit/rounding/large-total fixtures mapped in the screen run above; V01 visual evidence pending with T14 |
+| V05 | Partial (screen/monitor checks pass) | Small/zero dimensions and continued pure sampling/navigation/history recovery pass; application quit/resize behavior, Linux PTY and recorded emulator evidence pending |
 | T01–T13 | Pending | Scripted terminal/event/integration and Linux PTY evidence not run |
 | T14 | Pending | Recorded emulator identity, visual protocols and handled-exit observations required; TERM declaration is insufficient |
 | D01 | Pending (intermediate commands pass) | Final application gates and authorized repository handoff still required; exact compiler/commands recorded above |
-| D02 | Partial (dependencies and arguments/proc/monitor reviewed) | Graph/licenses, implemented pure contracts and selected borrowed views, production/scripted counter adapters reviewed; screen/runtime/integration effects and final review pending |
+| D02 | Partial (dependencies and arguments/proc/monitor/screen reviewed) | Graph/licenses, implemented pure selected-view/ASCII-rows contracts and production/scripted counter adapters reviewed; runtime/integration effects and final review pending |
 | D03 | Pending (foundation files reviewed; lockfile committed) | Identity, license, credit, instructions and compiler record reviewed above; Cargo.lock is in base revision 1977703; final artifact/revision review still required |
 | D04 | Pending | No nonprivileged live proc/interface/traffic UI smoke has been run |
 | D05 | Pending | Final implemented reference/departure and supersession review required |

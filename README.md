@@ -57,6 +57,37 @@ NLOAD_RS_PTY_BINARY=./target/release/nload-rs cargo test --locked --test linux_p
 The environment override is read only by the test harness. PTY protocol/state
 checks do not establish visible emulator behavior.
 
+## Arch Linux installation
+
+The [local-checkout PKGBUILD](packaging/arch/PKGBUILD) builds an `x86_64` package
+from this repository, including local source edits. After cloning, install the
+build tools and run these commands from the repository root:
+
+```sh
+sudo pacman -S --needed base-devel rust
+cd packaging/arch
+makepkg -si
+nload-rs
+```
+
+Run `makepkg` as your normal user; it requests elevated privileges when installing
+dependencies or the package. An existing Rustup installation with the stable
+toolchain can also provide Cargo in place of the `rust` package.
+
+The recipe reads the version from `Cargo.toml`, stages sources separately from
+the checkout's `target/`, fetches locked dependencies, then builds and tests
+offline. Dependency fetching requires network access unless they are already
+cached. Tests require accessible `/proc` and PTY allocation. The package installs
+`/usr/bin/nload-rs`, the README, and license notices; `pacman` tracks these files.
+
+To rebuild and reinstall after updating or editing the checkout, run
+`makepkg -fsi` from `packaging/arch/`; `-f` replaces an existing package archive
+even when the version has not changed. To uninstall:
+
+```sh
+sudo pacman -R nload-rs
+```
+
 ## License
 
 This application is licensed under **GPL-2.0-only**. See [LICENSE](LICENSE) for

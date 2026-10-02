@@ -1,0 +1,53 @@
+# Build the surrounding checkout, including local edits, rather than downloading
+# a release. Keep this file in packaging/arch/ inside the repository.
+_checkout=$(realpath -- "$(dirname -- "${BASH_SOURCE[0]}")/../..")
+
+pkgname=nload-rs
+# Cargo.toml remains the sole package-version authority.
+pkgver=$(awk '
+    /^\[package\]$/ { in_package = 1; next }
+    /^\[/ { in_package = 0 }
+    in_package && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
+' "$_checkout/Cargo.toml")
+pkgrel=1
+pkgdesc='A Linux single-interface network traffic monitor inspired by nload'
+arch=('x86_64')
+license=('GPL-2.0-only')
+depends=('glibc' 'libgcc')
+makedepends=('cargo')
+source=()
+sha256sums=()
+
+prepare() {
+    # Replace the staged tree so deleted checkout files cannot survive a rebuild.
+    rm -rf -- "$srcdir/$pkgname"
+    mkdir -p -- "$srcdir/$pkgname"
+    cp -a -- "$_checkout/"{Cargo.toml,Cargo.lock,src,tests,LICENSE,README.md,THIRD-PARTY-NOTICES.md} \
+        "$srcdir/$pkgname/"
+
+    cd "$srcdir/$pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked
+}
+
+build() {
+    cd "$srcdir/$pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release
+}
+
+check() {
+    cd "$srcdir/$pkgname"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    # Run PTY product checks against the executable that will be packaged.
+    NLOAD_RS_PTY_BINARY="$srcdir/$pkgname/target/release/$pkgname" cargo test --frozen
+}
+
+package() {
+    cd "$srcdir/$pkgname"
+    install -Dm0755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+    install -Dm0644 -t "$pkgdir/usr/share/licenses/$pkgname/" LICENSE THIRD-PARTY-NOTICES.md
+    install -Dm0644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

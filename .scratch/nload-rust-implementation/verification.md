@@ -757,6 +757,139 @@ for their detailed fixtures or for real product terminal evidence.
   subprocess checks are direct Linux execution but not interactive/live evidence.
   No new contractual conflict, domain decision or corrective ticket surfaced.
 
+## Product Linux PTY run — 2026-10-02
+
+Scope: [Verify the real binary through automated Linux PTY checks](issues/08-linux-pty.md).
+Asset: [Linux product PTY integration tests](../../tests/linux_pty.rs).
+
+### Revision, environment and commands
+
+- Base revision: `8e27c5215416aeef70fe02ff4211d75f4d97a94d`; the worktree was
+  clean before claiming the ticket. Production source, manifest, dependencies and
+  lockfile are unchanged. Tested addition: `tests/linux_pty.rs`, Git blob
+  `79cdd1398f64f5433ea9bb8080d0a2c3f201d304`. README/tracker/evidence updates
+  accompany it. No commit was made.
+- Compiler: rustc **1.98.1**, commit
+  `48a229ceaefd4985c50990b14116b6d856af0985`, LLVM 21.1.8; Cargo **1.98.0**,
+  commit `797e8a9bca276c1c9f9f738d2a20f484fa4eea9d`. Host/target:
+  `x86_64-unknown-linux-gnu`, NixOS 26.11.0. Kernel: `Linux nixos-dev 7.2.8
+  #1-NixOS SMP PREEMPT_DYNAMIC Fri Sep 25 14:37:14 UTC 2026 x86_64 GNU/Linux`.
+- The harness allocates Linux PTYs with `openpty`, uses `TERM=xterm-256color`
+  except in rejection/exemption cases, redirects stderr, and runs uninstrumented
+  product subprocesses. No emulator was observed. The accessible proc snapshot
+  contained `docker0`, `enp1s0`, and `lo`; tests derive membership count from the
+  actual product header and work with singleton lists as well.
+- Both separate stdin/stdout PTYs/OFDs and a single shared terminal/OFD were
+  exercised. Retained slave observers share the child's file-status flags and
+  survive its exit; no restoration claim rests on descriptor closure. Defined
+  termios fields/speeds/control characters and complete `F_GETFL` values are
+  compared, not struct padding. FDs are close-on-exec except explicit stdio.
+- Default Cargo testing spawns its real debug binary through
+  `CARGO_BIN_EXE_nload-rs`. `NLOAD_RS_PTY_BINARY` is a **test-harness-only**
+  override, used to repeat all checks by executing `./target/release/nload-rs`
+  directly. No production test CLI/environment injection or new dependency exists.
+- Finite poll/readiness/exit waits and small fragment/polling delays coordinate
+  OS effects; they are not numerical rate/timing oracles. Five-second watchdogs
+  detect hangs, and harness Drop kills/reaps a failed or stopped child.
+
+| Command | Actual outcome |
+| --- | --- |
+| `cargo fmt --check` | Exit 0 |
+| `cargo test --locked` | Exit 0; **93 unit/native/scripted + 11 product PTY = 104 passed**, 0 failed/ignored |
+| `cargo build --release --locked` | Exit 0; unchanged existing dead-code warning for Session dimension/notification convenience methods |
+| `NLOAD_RS_PTY_BINARY=./target/release/nload-rs cargo test --locked --test linux_pty` | Exit 0; **11 passed**, 0 failed/ignored, against the direct release executable |
+| `git diff --check` | Exit 0 |
+
+The final full debug PTY run and release PTY run each completed in **2.56 s**.
+Executable SHA-256 identities (build artifacts remain ignored):
+
+- `target/debug/nload-rs`: `85bd4b33c958adcc57aedb604a046eae2fefb99b61c18b3abe576ffa40a56b1f`.
+- `target/release/nload-rs`: `7ad245c475a9a29c3abac31b8f7e69d8ef6c06b216d20a9cebc21a4fefd998c1`.
+
+Initial harness development exposed two fixture issues, both corrected before
+the final gates: the first 8-test run passed 7/8 because it tried `tcgetattr` on
+a disconnected output terminal (Linux correctly returns EIO); the next 10-test
+run passed 9/10 because pre-filling a PTY alone did not reliably block its tiny
+setup write as the kernel moved queued bytes. Disconnected terminals now retain
+flag-only assertions, with termios checked on the healthy terminal. The setup
+backpressure fixture uses real `tcflow(TCOOFF)` before filling, preventing that
+queue movement; the harness undoes its own flow stop afterward. The corrected
+10-test run passed, and adding the practical real-EOF case produced the final
+11-test debug/release passes. No production defect was exposed or acceptance
+expectation weakened.
+
+### Product case-to-test evidence
+
+All names below are actual passing integration tests in `tests/linux_pty.rs`,
+executed against **both** product builds. Frames are checked for their actual
+absolute row addresses, printable bounded payloads and absence of LF/CR/unknown
+controls; this is protocol evidence, not an emulator renderer.
+
+| Passing test | Applicable cases and observations |
+| --- | --- |
+| `normal_controls_restore_real_modes_shared_flags_and_protocol` | T01/T02/T04/T06/T09: independent terminal input/output and redirected stderr accepted; full raw settings and nonblocking flags observed while active; typed Ctrl+Z does not stop processing; q/Q/Ctrl+C/external INT/TERM yield 0/0/130/130/143, empty stderr, exact entry/hide and cancel/show/leave sequences, original termios and both shared flags restored |
+| `shared_terminal_description_and_existing_nonblocking_flags_are_preserved` | T02/T09: same terminal/OFD for stdin/stdout, originally blocking and already-nonblocking variants; raw settings active, q returns 0 and full mode/flag/protocol restoration preserves original NONBLOCK |
+| `queued_external_interrupt_and_terminate_choose_interrupt` | T06/T09: after readiness, SIGSTOP plus observed stop notification allows TERM and INT to be kernel-pending before SIGCONT; handled exit is 130 with empty stderr and full restoration |
+| `fragmented_repeated_arrows_and_ignored_sequences_reach_expected_selection` | T03/T04/A11 real-input aspects: every CSI/SS3 arrow split after ESC and after introducer, each expected forward/backward position; repeated mixed arrows; modified CSI, PageUp/PageDown, Tab/Enter, Ctrl+Z, CSI q/Q and OSC command-looking payload ignored; following genuine navigation/quit completes normally |
+| `small_startup_resize_sampling_navigation_and_quit_keep_bounded_rows` | V05/T09: startup 59x16/60x15/1x1 succeeds; warning frames bounded; sampling leaves baseline while small where status fits; navigation while small selects expected entry; WINCH growth to 60x16 then 80x24 restores stacked measured layout, shrink to 1x1 and q still work; state/protocol restoration verified |
+| `rejected_term_and_independent_nonterminal_streams_do_not_mutate` | T01: TERM unset/empty/dumb/linux rejected with diagnostic/status 1 and no PTY output or residual OS changes; nonterminal stdin and stdout rejected independently; help/version exempt in terminal and redirected variants for every rejected declaration, status 0 without session entry or residual mutation |
+| `read_only_terminal_output_fails_setup_and_restores_changed_os_state` | T10 practical fault: a real read-only stdout PTY passes isatty but session entry write returns EBADF; status 1 and failed alternate-leave attempt diagnosed; input termios/flags and separate retained read-only output OFD flags restored; no screen bytes emitted |
+| `flow_stopped_output_during_setup_restores_os_state_despite_cleanup_failure` | T10/T13 practical fault: actual output flow stop/EAGAIN during session entry, status 1 and attempted leave-screen cleanup failure; no master drain needed for bounded exit; termios/input/output flags restored despite failed protocol output |
+| `runtime_input_and_output_hangups_fail_and_attempt_remaining_restoration` | T11/T13 practical faults: hang up input/output masters separately after frame readiness; fatal status 1. Input hangup diagnoses impossible termios restoration, still restores both OFD flags and emits show/leave on healthy output. Output hangup diagnoses both impossible protocol restorations, still restores input termios and both OFD flags |
+| `canonical_eof_on_real_input_is_fatal_and_restores_the_saved_session` | T11 practical EOF: after proving active raw mode, the harness changes the real input line discipline to canonical and sends VEOF on an empty line; actual read returns zero, product diagnoses terminal input closed/status 1 and restores saved state/protocols |
+| `backpressured_runtime_still_handles_quit_and_signal_with_bounded_cleanup` | T06/T08/T09/T13 supplemental real effects: resize to 1000x1000 fills real output, independently observed by loss of POLLOUT; without draining, q/INT/TERM still exit, both protocol restoration failures diagnosed and OS state restored. Cleanup-only failure promotes q to 1 and preserves 130/143 |
+
+### Practicality limitations and corresponding deterministic evidence
+
+- **T10, partial setup writes/every initialization stage:** read-only and
+  flow-stopped real terminals establish failures after actual mode/flag mutation,
+  but Linux PTY scheduling does not reliably force a particular short write
+  inside an eight-byte setup sequence or fail each ownership/registration/ioctl
+  stage. Passing `terminal::session::tests::{every_initialization_failure_restores_only_applicable_attempted_effects,
+  partial_screen_commands_are_recorded_even_when_the_remainder_fails,
+  interrupted_and_short_setup_writes_resume_without_repeating_emitted_bytes}`
+  provide exact stage/partial-prefix/EINTR evidence; application propagation is
+  covered by `application::tests::initialization_and_caught_startup_runtime_panics_use_the_guarded_application_path`.
+- **T11, clock and additional syscall faults:** real EOF/hangups are exercised,
+  but malformed/regressing/failing BOOTTIME and every poll/read/write error cannot
+  be induced through a PTY alone. Passing
+  `terminal::runtime::tests::{clock_failure_regression_and_idle_deadline_overflow_have_no_fallback,
+  input_eof_and_effect_faults_are_fatal_while_transient_io_yields}` and
+  `application::tests::actual_loop_runtime_faults_restore_before_reporting`
+  cover those fatal effects and cleanup. Native
+  `terminal::linux::runtime::tests::{checked_timespec_conversion_rejects_invalid_fields_and_overflow,
+  timer_effect_errors_and_incomplete_reads_are_fatal}` cover conversion/timer faults.
+- **T06, full/collated internal signal pipe:** its private FD is not exposed to
+  the product harness. Actual external idle/backpressured signals and queued INT/
+  TERM pass here; passing
+  `terminal::linux::tests::full_pipe_and_collated_tokens_do_not_replace_atomic_signal_identity`
+  retains precise drain-before-flags/full-pipe evidence. Shutdown priority and
+  handler ownership/order remain backed by scripted integration/source review.
+- **T11/T13, impossible restoration:** once a PTY master is closed, termios
+  inspection/restoration on that disconnected terminal can return EIO. The test
+  records failed restoration attempts rather than claiming restored state there;
+  it checks the healthy terminal and retained flags. Unwritable/full output cannot
+  prove a successful show/leave sequence, so those tests require diagnostics and
+  OS restoration. Normal exits and real EOF prove emitted cleanup sequences.
+- **T08/V05, exact sampling/history and visual behavior:** blocked-product tests
+  establish live quit/signal handling, not exact sample counts under backpressure.
+  Passing `application::tests::backpressure_and_partial_frames_preserve_sampling_and_latest_redraw`
+  establishes continuing actual scripted acquisitions/partial-frame order, and
+  `application::tests::small_session_keeps_offscreen_sampling_and_recovers_real_history_on_growth`
+  establishes exact retained-history recovery. PTY rows do not establish visible
+  no-wrap, bar/history appearance, prior-screen return or visible cursor.
+- **Diagnostic ordering:** saved OS state and complete output are observed on
+  exit; separate stdout/stderr streams do not themselves prove all inter-stream
+  ordering. The deterministic application's stderr writer requires notification
+  release before diagnostics, and session effect logs require every applicable
+  restoration first, as recorded in the earlier passing mappings.
+
+The requested practical product P evidence passes for V05 and T01–T04/T06/
+T09–T11, with the explicit limitations above backed by passing deterministic/native
+evidence under the specification's practicality rule. E evidence for V05/T14,
+L evidence for D04 and final B/revision review remain pending. No corrective
+blocker, new domain decision or newly specifiable fog surfaced.
+
 ## Acceptance case ledger
 
 These are section 10 case identifiers, not issue references. Each future evidence
@@ -771,19 +904,19 @@ The parent effort's acceptance remains open.
 | A04–A06 | D passes | Raw selection/full membership, before/after-name options, independent/global ceilings, limits/repetition/zero and grammar/no-effect dispatch pass |
 | A07 | D passes; final B review pending | Application startup fixture passes under set/unset HOME and differing locale; source contains no configuration access |
 | A08–A10 | D passes | Distinct discovery/selection/clock failures, natural ordering, exact effect order, baseline reuse/completion timestamp and long-initialization anchored deadline fixtures pass |
-| A11 | D passes; real input/visual evidence pending in T03/T14 | Symmetric arrows/wrapping/singleton, aliases ignored, zero acquisition/sample/reset effects and prompt redraw fixtures pass |
+| A11 | D passes; T03 real input passes; T14 visual pending | Symmetric arrows/wrapping/singleton, aliases ignored, zero acquisition/sample/reset effects and prompt redraw fixtures pass; fragmented/repeated product CSI/SS3 input passes |
 | A12 | D passes | Module and loop removal/rename/addition/failure/return cases retain membership/selection and reset to baseline without bridging gaps |
 | S01–S05 | D passes | Complete proc/EOF/fresh traversal and exact numerical fixtures above, with quiet nonfatal failure/absence behavior connected in the application |
 | S06–S07 | D passes; S06 final B review pending | Actual intervals/nonpositive observations, BOOTTIME/timerfd native checks, anchored completion deadlines/missed slots, one delayed sample and first-future checked arithmetic pass |
 | S08–S12 | D passes | Exact deltas/extrema/resets/off-screen history/boundary expiry/resize rendering pass; loop also preserves actual history through small-mode sampling/navigation/growth |
 | S13 | D and intermediate B review pass; final B review pending | Owned BOOTTIME/timerfd and checked conversions/effect faults, bulk traversal and application completion timestamps pass |
 | V01–V04, V06–V08 | D passes; V01 visual evidence pending in T14 | Exact pure screen geometry/bar/state/name/overflow/unit/rounding/large-value fixtures pass and rows are connected to runtime frames |
-| V05 | D passes; P/E pending | Small-mode actual loop sampling/navigation/quit and growth/history recovery pass; product PTY and emulator evidence required |
-| T01–T04 | D passes; P pending | Existing support/raw/decoder fixtures and integrated informational/no-effect/support/typed-control handling pass; native adapter checks are not product PTY acceptance |
+| V05 | D/P pass; E pending | Exact scripted history recovery plus product small startup/sampling/navigation/resize/quit/bounded rows pass; visible emulator recovery still required |
+| T01–T04 | D/P pass | Real product support rejection/informational exemptions, raw mode/shared OFD flags, typed controls, fragmented/repeated arrows and ignored sequences pass against debug/release |
 | T05 | D passes | Exact idle/buffering module fixtures and integrated parser wait/timeout-without-acquisition pass |
-| T06 | D and intermediate B review pass; P/final B pending | Drain-before-flags/full-pipe/simultaneous-INT arbitration and native wake checks pass; integrated pending/during-acquisition/backpressured shutdown passes |
+| T06 | D/P and intermediate B review pass; final B pending | Product external signals, queued INT/TERM arbitration and backpressured shutdown pass; private full-pipe/drain semantics backed by native/scripted evidence |
 | T07–T08 | D passes | Bounded batches, due-before-next-input fairness, shutdown priority, coalesced dirty redraw, untouched replacement/partial resumption and continuing actual acquisitions under EAGAIN pass |
-| T09–T11 | D passes; practical product P pending | Actual loop controls/failure propagation, staged/partial initialization and exhaustive restoration before diagnostics pass |
+| T09–T11 | D and practical product P pass | Debug/release normal exits and retained OS/protocol restoration, real setup EBADF/EAGAIN, EOF and independent hangups pass; stage/short-write/clock-fault limitations explicitly mapped above |
 | T12–T13 | D passes; T12 final B review pending | Application startup/runtime panics use guarded cleanup; prior hook restored/nonpanicking fallback verified; actual loop exits with multiple cleanup failures choose/preserve required statuses |
 | T14 | Pending | Recorded emulator identity, visual protocols and handled-exit observations required; TERM declaration is insufficient |
 | D01 | Pending (intermediate commands pass) | Final application gates and authorized repository handoff still required; exact compiler/commands recorded above |
@@ -796,8 +929,6 @@ The parent effort's acceptance remains open.
 
 - Final deterministic coverage/artifact review against every specification section;
   current module and application mappings/checks pass as recorded above.
-- Automated Linux PTY checks with actual OS-state restoration evidence, including
-  practical real faults and explicit limitations backed by scripted tests.
 - Human-recorded xterm-compatible emulator observations and nonprivileged live
   smoke; neither is replaced by redirected informational/nonterminal execution.
 - Final source/artifact review, required command gates and authorized final

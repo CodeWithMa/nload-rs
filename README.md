@@ -8,9 +8,9 @@ Inspired by [nload](https://github.com/rolandriegel/nload) by Roland Riegel.
 
 The application runs a single-interface view with incoming/outgoing graphs,
 traffic statistics and arrow-key navigation through the startup interface list.
-Deterministic module and application-loop checks are implemented. Automated
-product PTY checks, recorded emulator observations and live-smoke acceptance are
-the next verification steps.
+Deterministic module/application-loop checks and automated Linux product PTY
+checks pass. Recorded emulator observations, live smoke and final artifact review
+are the next verification steps.
 
 ## Build and run
 
@@ -44,6 +44,17 @@ kBit/s; each defaults to 10240, and zero restores that direction's default.
 Help/version work with redirected streams. Interactive and live evidence is
 recorded as verification progresses. Repeatable builds use the recorded compiler
 and locked dependencies; byte-identical executable output is not promised.
+
+On Linux, `cargo test --locked` also runs the real binary through owned PTYs;
+these tests require accessible `/proc` and PTY allocation, without administrative
+privileges. To run the same checks against the built release executable:
+
+```sh
+NLOAD_RS_PTY_BINARY=./target/release/nload-rs cargo test --locked --test linux_pty
+```
+
+The environment override is read only by the test harness. PTY protocol/state
+checks do not establish visible emulator behavior.
 
 ## License
 

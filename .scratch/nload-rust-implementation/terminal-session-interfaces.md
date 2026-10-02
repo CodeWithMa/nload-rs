@@ -100,7 +100,7 @@ No diagnostic or default panic output is emitted by the session module.
   caught payloads are deliberately forgotten rather than dropped during cleanup.
   Unwritable terminals still have only best-effort screen restoration.
 
-## Internal seam and next runtime ticket
+## Internal seam and runtime connection
 
 `session::SessionOps` is an internal effect seam used by the Linux adapter and
 the failure-script adapter. State capture, raw/flags, notification setup/release,
@@ -108,13 +108,14 @@ write/writability, dimensions and inspection are effect operations; callers use
 the staged Session interface instead of coordinating them. Its types remain
 inside the private session module.
 
-The sibling runtime implementation can use `Session::effects_mut()` and the
-Linux adapter's lifetime-borrowed input/output/signal FDs. No raw descriptor is
-handed to the application. Add event/clock/output behavior through the owning
-[Implement incremental input and nonblocking runtime effects](issues/06-terminal-events.md)
-ticket. Setup/cleanup sequence writes are separate from its resumable application
-frame handling; this implementation does not establish frame scheduling,
-BOOTTIME/timerfd, input decoding, fairness or product PTY acceptance.
+The runtime uses `Session::effects_mut()` internally and the Linux adapter's
+lifetime-borrowed input/output/signal FDs. Application callers use
+`session.runtime(&mut clock)` after initialization; no raw descriptor is handed
+to the application. See [Terminal runtime and clock interface](terminal-runtime-interfaces.md)
+for BOOTTIME/timerfd, input decoding, readiness and bounded frame operations owned
+by [Implement incremental input and nonblocking runtime effects](issues/06-terminal-events.md).
+Setup/cleanup sequence writes are separate from resumable application frame
+handling. Fairness and product PTY acceptance remain integration/verification work.
 
 ## Verification
 

@@ -525,6 +525,120 @@ scripted logic evidence with native Linux operations, not the product PTY campai
 - No contractual conflict, new domain decision or concrete corrective ticket
   surfaced; the existing fog and downstream tickets remain applicable.
 
+## Terminal runtime run — 2026-10-02
+
+Scope: [Implement incremental input and nonblocking runtime effects](issues/06-terminal-events.md).
+Caller contract: [Terminal runtime and clock interface](terminal-runtime-interfaces.md).
+
+### Revision, environment and commands
+
+- Base revision: `4f9ac1ad4ad518e1da8a9eb0b2058a82f83093bb`; worktree was clean
+  before the ticket claim. Tested source is the uncommitted terminal root/Linux
+  re-export updates and new `src/terminal/input.rs`, `src/terminal/runtime.rs`,
+  `src/terminal/runtime/{scripted.rs,tests.rs}` and
+  `src/terminal/linux/runtime{.rs,/tests.rs}` on that base. No commit was made.
+- `rustc --version --verbose` reconfirmed **1.98.1**, commit
+  `48a229ceaefd4985c50990b14116b6d856af0985`, host
+  `x86_64-unknown-linux-gnu`, LLVM 21.1.8. `cargo --version --verbose`
+  reconfirmed **1.98.0**, commit
+  `797e8a9bca276c1c9f9f738d2a20f484fa4eea9d`, NixOS 26.11.0.
+  Manifest, dependency graph and lockfile are unchanged.
+- Commands ran at the repository root. Deterministic fixtures use explicit clock
+  readings and shared effect-script handles; they observe ordered events, effect
+  requests and emitted bytes, never decoder/frame internals. Native checks use
+  owned nonblocking pipes and actual BOOTTIME timerfds. No sleeps or actual elapsed
+  rates serve as numerical oracles; the native due-timer check uses a finite
+  one-second poll wait for an already-past absolute deadline.
+
+| Command | Actual outcome |
+| --- | --- |
+| `cargo fmt && cargo test --locked terminal::` (initial runtime implementation) | Exit 0; **33 passed** (14 new), 40 unrelated tests filtered out |
+| `cargo fmt && cargo test --locked terminal::` (after extra input/ready-output coverage) | Exit 0; **35 passed** (16 new), 40 unrelated tests filtered out |
+| `cargo fmt --check` | Exit 0 |
+| `cargo test --locked` | Exit 0; **75 passed**, 0 failed/ignored |
+| `cargo build --release --locked` | Exit 0; release binary builds; unused-import/dead-code warnings for interfaces awaiting application wiring |
+| `git diff --check` | Exit 0; no tracked-file whitespace diagnostics |
+
+The final test harness reports five unused-interface warnings; no failure occurred.
+The product entry point is still the foundation scaffold, so these intermediate
+commands do not establish direct product UI/PTY/emulator/live acceptance.
+
+### Deterministic runtime case-to-test evidence
+
+All names below are actual passing tests under `terminal::runtime::tests`.
+
+| Passing test | Applicable cases and observations |
+| --- | --- |
+| `every_csi_and_ss3_fragment_boundary_yields_one_ordered_arrow` | T03/A11 input portions: each of eight unmodified arrow forms split at every boundary, individual ESC/introducer/final reads, repeated mixed CSI/SS3 events, exact forward/backward order and no repeated event on timeout processing |
+| `typed_interrupt_does_not_wait_behind_an_incomplete_escape_sequence` | T02/T04/T09 input portions: raw Ctrl+C immediately yields Interrupt during ESC, CSI, SS3 and control-string fragments, without waiting for parser completion/timeout |
+| `unknown_modified_and_string_sequences_consume_command_looking_bytes` | T04: every byte fragmented for modified CSI/SS3, PageUp/PageDown, Tab/Enter/Ctrl+Z, ESC/CSI q/Q finals, intermediate sequences and OSC/DCS/SOS/PM/APC payloads; no spurious navigation/quit; plain q/Q/3 yield exact Quit/Quit/Interrupt events |
+| `idle_timeout_is_a_wait_deadline_and_resets_at_exact_boundary` | T05: below/exactly/above 100-ms boundary, exact residual wait timeout and zero-time overdue poll request, fragment completion clears timeout, no input read during timeout-only processing; parser timeout creates no counter-acquisition effect |
+| `sustained_input_and_overlong_sequences_are_bounded_and_discarded` | T05/T07 runtime portion: 10,000-byte unknown CSI consumed in one 256-byte read per batch, command-looking final ignored, following genuine arrow/quit retained; overlong incomplete sequence resets after idle timeout; constant-size/no-byte-buffer parser verified by source review |
+| `untouched_frames_replace_but_partial_frames_finish_without_duplicate_bytes` | T08: initial EAGAIN leaves frame replaceable; short writes including a split ESC control prefix make replacement fail; EINTR and additional short writes resume exact suffix; final full emitted stream is current frame then latest frame, with no obsolete frame, duplication or interleaving |
+| `backpressure_keeps_clock_input_signals_resize_and_timer_effects_available` | T06/T08 runtime portions: repeated EAGAIN output across explicit sample-length times, simultaneous input/signal/timer readiness, exact navigation, dimension reads, clock readings and pending Interrupt/resize remain available; every wait monitors pending output alongside the other effects |
+| `output_batches_are_finite_and_frames_reject_out_of_bounds_protocol_injection` | T08/V05/V06 terminal portions: no frame payload outside supplied width/height, nonprintable/Unicode/control injection rejected; zero-size encoding; a >20-KiB row emits only 16 KiB in the first batch, then finishes with correct row positioning/trailing-space trimming |
+| `input_eof_and_effect_faults_are_fatal_while_transient_io_yields` | T11: input EOF/BrokenPipe, zero/invalid-count/BrokenPipe output, poll, signal inspection and dimension failures return fatal errors; input EINTR/EAGAIN yields an empty batch without blocking |
+| `clock_failure_regression_and_idle_deadline_overflow_have_no_fallback` | S13/T11: explicit clock failure prevents a wait effect, backwards readings fail, u64-end input deadline overflow fails, no substitute clock/time or counter-unavailable outcome |
+
+These fixtures exercise `Runtime<ScriptedEffects>` through the same caller-facing
+methods used by production. The scripted clock and terminal effects are available
+to application integration via `terminal::scripted`; application scheduling and
+counter calls are intentionally observed by that downstream ticket's own fixtures.
+
+### Native Linux runtime evidence
+
+All names below are actual passing tests under `terminal::linux::runtime::tests`.
+They supplement deterministic evidence with real FD syscalls, not the product PTY
+campaign or visible terminal protocols.
+
+| Passing test | Applicable cases and observations |
+| --- | --- |
+| `checked_timespec_conversion_rejects_invalid_fields_and_overflow` | S13: negative seconds/nanoseconds, nanosecond field at one billion, multiplication overflow and exact u64 addition-overflow boundary rejected; exact round trips for 0/1/subsecond/second, values above f64 integer precision and maximum-u64 nanoseconds |
+| `owned_boottime_timer_is_absolute_nonblocking_and_consumes_due_zero_deadline` | S13/S07 runtime portions: actual BOOTTIME readings are nondecreasing; FD has NONBLOCK/CLOEXEC; absolute zero deadline is immediately due rather than disarmed; readiness count consumed; future timer has positive remaining time and zero repeat interval (one shot) |
+| `poll_detects_each_owned_fd_hangup_error_and_invalid_descriptor` | T11/S13: native pipe hangup and POLLNVAL exercised in each input/signal/timer/output poll position; broken output-reader POLLERR detected without a dangerous SIGPIPE write |
+| `timer_effect_errors_and_incomplete_reads_are_fatal` | S13/T11: replace owned timerfd with an owned pipe to induce settime failure; transient EAGAIN yields, short expiration-count read and EOF fail; replacement drops the real FD normally without dangling ownership |
+| `linux_runtime_reports_ready_output_transient_input_and_actual_eof` | T02/T11 runtime portions: output ready only when requested, EAGAIN input, actual bytes 3/26/Q read unchanged, input EOF and subsequent poll hangup detected on native nonblocking pipes |
+| `real_nonblocking_backpressure_does_not_hide_input_signal_or_timer_readiness` | T03/T06/T08 native runtime portions: fill actual output pipe to EAGAIN, retain queued frame, poll simultaneous fragmented input and signal wake with output not ready, decode following arrow, drain/inspect sticky INT flag, read clock and wake on due timer while output remains full |
+
+The established full/collated signal-pipe and real registered-signal tests also
+continue passing in the full run. Runtime delegates notification inspection to
+that same drain-before-flags implementation; it does not interpret signal bytes.
+
+### Module review and remaining integration evidence
+
+- Unsafe syscalls are confined to `terminal/linux.rs` and its concrete runtime
+  adapter/native checks. Decoder, frame state and shared scripted effects are
+  safe Rust. No threads, async runtime, new dependencies, counter acquisition or
+  monitor mutation were introduced. Clock and waiting use BOOTTIME throughout;
+  existing session `Instant` use remains limited to finite cleanup retry budgets.
+- The clock owns the timerfd; the runtime exclusively borrows session/clock
+  owners. Input/output batches each perform one syscall, preserving caller control
+  for shutdown-first fairness. Poll monitors all required owned FDs and gates
+  writable interest on the single pending frame. Expiration counts are discarded;
+  next-slot scheduling and completion timestamp placement remain application-owned.
+- Decoder memory is constant: no accumulated sequence bytes, a length capped at
+  65 to detect >64 and a discard state through terminator/timeout. Exact idle
+  expiry is checked before the next fragment; genuine raw Ctrl+C remains an
+  immediate explicit shutdown control. q/Q inside an unknown sequence is consumed.
+- One encoded frame owns its emitted offset. A newer frame replaces only offset
+  zero, including after EAGAIN/EINTR. Partial frames resume without an output-only
+  wait. Encoding clears/positions bounded ASCII rows without CR/LF or mode changes;
+  right-margin/resize visual observations still require the product PTY/emulator
+  work. Cleanup cancels a possible abandoned escape prefix through the existing
+  Session restoration contract.
+- A10/S06/S07/S13 acquisition timestamps/first-future deadline behavior, T07
+  shutdown-first sample/input ordering and T08 continuing **actual application
+  acquisitions** under backpressure are pending in
+  [Integrate startup, sampling and the interactive application loop](issues/07-application-integration.md).
+  Module availability under backpressure is passing evidence, not fairness proof.
+- T03/T04 real fragmented product input, T06 idle product signal wake, T09 actual
+  exits, and T11 propagation/detection plus exhaustive restoration in the live
+  application require integration and practical PTY evidence. The scripted/native
+  failures above establish effect detection, while existing session tests establish
+  cleanup/error arbitration; their connection is not yet claimed passing.
+- No new product/domain decision, specification conflict or concrete corrective
+  ticket surfaced. Existing downstream tickets and map fog remain applicable.
+
 ## Acceptance case ledger
 
 These are section 10 case identifiers, not issue references. Each future evidence
@@ -538,25 +652,26 @@ implementation. **No complete acceptance case is marked passing yet.**
 | A07 | Partial (module checks/review pass) | Pure defaults/selection tests pass with set/unset HOME; no configuration I/O in these modules; complete application view/artifact review pending |
 | A08–A09 | Partial (module checks pass) | Complete snapshot errors versus empty/missing selection; natural raw-byte order/long digit/locale and fixed monitor membership pass; application dispatch/use pending |
 | A10 | Pending | Startup effect ordering and clock/deadline anchoring pending; Monitor supports discovery-data baselines without redundant acquisition |
-| A11 | Partial (monitor checks pass) | Symmetric forward/backward wrapping, singleton, view/history/statistics invariance pass; decoded arrows/ignored aliases/prompt redraw and no-effect loop assertions pending |
+| A11 | Partial (monitor/runtime checks pass) | Symmetric wrapping, singleton, view/history/statistics invariance and ordered decoded arrows/ignored aliases pass; prompt redraw/no-effect loop assertions and product input/visual evidence pending |
 | A12 | Module fixtures pass; application use pending | Combined snapshot/monitor raw-name removal/rename/additions/return, fixed membership/selection, navigable unavailability and new-run baseline checks pass |
 | S01 | Module checks pass; final application use pending | Whole-snapshot raw/max-u64/field tests, large chunked EOF/fresh acquisition tests and production reopen review above |
 | S02 | Partial (acquisition/monitor checks pass) | Global read/parse failure versus valid absence, paired reset, unavailable totals and baseline return pass; nonfatal quiet application continuation pending |
 | S03–S05 | Module checks pass; final application use pending | Warm-up/totals/independent directions and exact/partial current/average numerical examples pass |
-| S06–S07 | Partial (monitor checks pass) | Explicit nanosecond actual-time intervals, ignored nonpositive rounds and no catch-up graph columns pass; production BOOTTIME, wall-clock independence, clock failures and deadline/timerfd effects pending |
+| S06–S07 | Partial (monitor/runtime checks pass) | Actual-time intervals, ignored nonpositive rounds, no catch-up graph columns, BOOTTIME clock and absolute one-shot timerfd pass; acquisition timestamps, anchored missed-slot/first-future deadlines and application integration pending |
 | S08–S11 | Module checks pass; final application use pending | Exact deltas/totals, unrounded run extrema/idle/window expiry, both counter-decrease resets, failures/return and never-viewed history pass |
 | S12 | Monitor/screen module checks pass; application use pending | Exact-boundary expiry, actual fitting history rows, real zero columns, shrink/grow recovery and repeated redraw/view invariance pass; terminal/application resize behavior pending |
-| S13 | Partial (proc shape reviewed) | Bulk traversal already reviewed; production clock/timerfd and conversion/failure fixtures pending |
+| S13 | Partial (proc/runtime checks and review pass) | Bulk traversal, owned BOOTTIME/timerfd, checked conversion and clock/FD failure fixtures pass; application acquisition-completion timestamp use and final seam review pending |
 | V01–V04, V06–V08 | Screen module checks pass; final application use pending | Exact geometry/bar/state/name/overflow/unit/rounding/large-total fixtures mapped in the screen run above; V01 visual evidence pending with T14 |
 | V05 | Partial (screen/monitor checks pass) | Small/zero dimensions and continued pure sampling/navigation/history recovery pass; application quit/resize behavior, Linux PTY and recorded emulator evidence pending |
 | T01–T02 | Partial (session/adapter checks pass) | Support pre-mutation scripts, owned Linux PTY raw/flags/dimensions round trip and notification-before-mutation pass; application informational/stream behavior, typed controls and product PTY evidence pending |
-| T03–T05 | Pending | Incremental input/timeout fixtures and integrated product input evidence pending |
-| T06 | Partial (signal adapter checks pass) | Full/collated pipe, drain-before-flag, simultaneous INT priority, actual registered-signal wake/unregister/FD lifetime pass; product loop and PTY evidence pending |
-| T07–T08 | Pending | Fairness/shutdown-first integration and resumable application frame checks pending |
-| T09–T13 | Partial (owner/exit-boundary checks pass) | Staged initialization/partial-write restoration, normalized statuses/error arbitration, multiple cleanup faults, panic-hook restoration and nonpanicking Drop pass; application runtime detection/boundary wiring and practical product PTY evidence pending |
+| T03–T05 | Runtime module fixtures pass; application/product input evidence pending | All CSI/SS3 fragmentation, repeats/order, modified/unknown sequence consumption, quit controls, constant-size parser, exact idle boundaries and wait deadlines pass; product PTY input and final application use pending |
+| T06 | Partial (signal/runtime adapter checks pass) | Full/collated pipe, drain-before-flag, simultaneous INT priority, registered-signal wake/unregister/FD lifetime and native poll wake under backpressure pass; product loop and PTY evidence pending |
+| T07 | Pending (bounded runtime batches established) | One-read/one-write batches provide the loop seam; shutdown-first ordering, due sampling and sustained-input/resize fairness integration pending |
+| T08 | Partial (scripted/native runtime checks pass) | Untouched-only replacement, exact partial suffix resumption, bounded writes and continued clock/input/signal/timer availability under real/scripted EAGAIN pass; continuing application sampling/redraw coalescing under backpressure pending |
+| T09–T13 | Partial (owner/runtime/exit-boundary checks pass) | Staged restoration, normalized control/status arbitration, detected clock/EOF/hangup/I/O faults, multiple cleanup faults, panic-hook restoration and nonpanicking Drop pass; application boundary/propagation wiring and practical product PTY evidence pending |
 | T14 | Pending | Recorded emulator identity, visual protocols and handled-exit observations required; TERM declaration is insufficient |
 | D01 | Pending (intermediate commands pass) | Final application gates and authorized repository handoff still required; exact compiler/commands recorded above |
-| D02 | Partial (dependencies and arguments/proc/monitor/screen/session reviewed) | Graph/licenses, pure view/rows, production/scripted counter and terminal session effects reviewed; remaining runtime/integration effects and final review pending |
+| D02 | Partial (dependencies and five module implementations reviewed) | Graph/licenses, pure view/rows, production/scripted counter/clock/terminal effects and adapter-only unsafe reviewed; application connections and final artifact review pending |
 | D03 | Pending (foundation files reviewed; lockfile committed) | Identity, license, credit, instructions and compiler record reviewed above; Cargo.lock is in base revision 1977703; final artifact/revision review still required |
 | D04 | Pending | No nonprivileged live proc/interface/traffic UI smoke has been run |
 | D05 | Pending | Final implemented reference/departure and supersession review required |

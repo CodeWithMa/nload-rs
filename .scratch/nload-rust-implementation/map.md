@@ -30,6 +30,7 @@ A working Linux `nload-rs` application satisfying [Minimal Rust port of nload â€
 - [Implement the pure monitor and statistics runs](issues/03-monitor-statistics.md#resolution--2026-10-02--alice): Fixed-list monitor, exact-delta windows, paired resets and retained off-screen histories implemented with a borrowed selected view; 15 new fixtures and all 28 tests pass, with screen/runtime evidence pending.
 - [Implement the pure ASCII screen and formatting](issues/04-ascii-screen.md#resolution--2026-10-02--alice): Bounded owned ASCII rows, stacked graphs/statuses and exact widened formatting implemented; 12 new fixtures and all 40 tests pass, with terminal/application and visual evidence pending.
 - [Implement staged terminal ownership and shutdown cleanup](issues/05-terminal-session.md#resolution--2026-10-02--alice): Owned raw/nonblocking terminal session, atomic signal pipe, exhaustive restoration and caught-panic/exit arbitration implemented; 19 new checks and all 59 tests pass, with runtime/application and product PTY evidence pending.
+- [Implement incremental input and nonblocking runtime effects](issues/06-terminal-events.md#resolution--2026-10-02--alice): Bounded CSI/SS3 decoder, checked BOOTTIME/timerfd readiness and single-frame resumable nonblocking output implemented with shared scripted effects; 16 new checks and all 75 tests pass, with application fairness/sampling and product terminal evidence pending.
 
 ## Not yet specified
 

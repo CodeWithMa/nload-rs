@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use super::session::{Notifications, Saved, SessionOps, Shutdown, Support};
 
+mod runtime;
+pub(crate) use runtime::{LinuxClock, LinuxRuntime};
+
 /// Concrete Linux effect adapter. Duplication owns descriptor lifetimes, but
 /// file-status flags still share the original open-file descriptions and are
 /// therefore explicitly restored by Session.

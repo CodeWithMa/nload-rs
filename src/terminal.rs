@@ -7,8 +7,14 @@
 //! concrete adapters. The thin application loop connects these effects to pure
 //! modules. Session restoration also covers incomplete initialization.
 
+mod input;
 mod linux;
+mod runtime;
 mod session;
 
-pub(crate) use linux::LinuxTerminal;
+pub(crate) use linux::{LinuxClock, LinuxRuntime, LinuxTerminal};
+pub(crate) use runtime::{Clock, Event, Ready, Runtime, RuntimeEffects};
 pub(crate) use session::{ExitReport, Failure, Notifications, Session, Shutdown, guarded};
+
+#[cfg(test)]
+pub(crate) use runtime::scripted;

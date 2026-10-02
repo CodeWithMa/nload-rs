@@ -129,10 +129,12 @@ impl<O: SessionOps> Session<O> {
         Ok(dimensions)
     }
 
+    #[cfg(test)]
     pub(crate) fn dimensions(&mut self) -> io::Result<(usize, usize)> {
         self.ops.dimensions()
     }
 
+    #[cfg(test)]
     pub(crate) fn notifications(&mut self) -> io::Result<Notifications> {
         self.ops.notifications()
     }

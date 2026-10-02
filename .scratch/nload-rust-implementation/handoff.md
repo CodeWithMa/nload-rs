@@ -71,11 +71,12 @@ Application source, tests, manifest, lockfile and license artifacts have no
 uncommitted changes. `Cargo.lock` is tracked and was committed in
 `1977703de7d9321c92545ad6fc864c2099e2dc50`; the committed-lockfile condition passes.
 
-This audit adds an uncommitted documentation-only delta: README, this handoff,
-the verification record, final acceptance ticket and parent map. No commit was
-made in the audit session. A future authorized documentation commit can include
-these files; application acceptance does not depend on inventing a new source
-revision when the already committed implementation is unchanged.
+The audit produced a documentation-only delta: README, this handoff, the
+verification record, final acceptance ticket and parent map. No commit was made
+in the audit session. These files were subsequently committed in `53adbfa`
+(`docs: complete final acceptance audit and implementation handoff`), without
+changing the application implementation. The tested revision above identifies
+the implementation accepted by that audit.
 
 Release SHA-256:
 `7ad245c475a9a29c3abac31b8f7e69d8ef6c06b216d20a9cebc21a4fefd998c1`.

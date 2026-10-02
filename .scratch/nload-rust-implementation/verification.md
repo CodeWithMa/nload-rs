@@ -422,6 +422,109 @@ adjacent exact integer totals beyond f64 integer precision.
   evidence. The foundation entry point still awaits wiring, so no direct UI,
   PTY/emulator or live acceptance run is claimed by this pure-module ticket.
 
+## Terminal session run — 2026-10-02
+
+Scope: [Implement staged terminal ownership and shutdown cleanup](issues/05-terminal-session.md).
+Caller contract: [Terminal session and exit interface](terminal-session-interfaces.md).
+
+### Revision, environment and commands
+
+- Base revision: `a892ef28683faebba47fc230e43eef48cef5ddea`; the worktree was
+  clean before the ticket claim. Tested implementation is the uncommitted
+  `src/terminal.rs` update and `src/terminal/{linux.rs,session.rs,session/tests.rs}`
+  additions on that base. No commit was made.
+- `rustc --version --verbose` reconfirmed **1.98.1**, commit
+  `48a229ceaefd4985c50990b14116b6d856af0985`, host
+  `x86_64-unknown-linux-gnu`, LLVM 21.1.8. `cargo --version --verbose`
+  reconfirmed **1.98.0**, commit
+  `797e8a9bca276c1c9f9f738d2a20f484fa4eea9d`, NixOS 26.11.0.
+  Manifest, dependencies, lockfile and other application modules were unchanged.
+- Commands ran from the repository root. Scripts use effect logs/controlled
+  failures, not sleeps or timing as a numerical oracle. Native adapter checks use
+  an owned Linux PTY, a full nonblocking pipe, and a subprocess of the test
+  harness for process-global signal registration. There is no product test flag.
+
+| Command | Actual outcome |
+| --- | --- |
+| `cargo fmt && cargo test --locked terminal::` (first implementation) | Exit 0; 14 terminal fixtures pass; compiler identified private-bound visibility warnings, subsequently corrected |
+| `cargo fmt && cargo test --locked terminal::` (after exit-interface/adapter additions) | Exit 0; 17 fixtures pass |
+| `cargo fmt && cargo test --locked terminal::` (final source) | Exit 0; **19 passed**, 0 failed; 40 unrelated tests filtered out |
+| `cargo fmt --check` | Exit 0 |
+| `cargo test --locked` | Exit 0; **59 passed**, 0 failed/ignored |
+| `cargo build --release --locked` | Exit 0; 99 unused-import/dead-code warnings for modules awaiting application/runtime wiring |
+| `git diff --check` | Exit 0; no tracked-file whitespace diagnostics |
+
+The final harness has three expected unused-interface warnings. No private-bound
+warnings remain. The product entry point still emits its foundation diagnostic;
+this ticket does not claim direct product UI/PTY/emulator/live verification.
+
+### Session case-to-test evidence
+
+All names below are actual passing tests under `terminal::session::tests`.
+Assertions observe Session results, returned ExitReport, effect calls and the
+scripted external terminal state, not the owner's private stage flags.
+
+| Passing test | Applicable cases and observations |
+| --- | --- |
+| `support_rejects_each_stream_and_term_before_snapshot_or_mutation` | T01: independent nonterminal streams; TERM unset/empty/dumb/linux; only support read occurs, no saved-state/notification/mutation effects |
+| `ownership_snapshot_and_notifications_precede_every_mutation` | T02/T09: exact validation→snapshot→notification→raw→flags→dimensions→screen order; original flags retained, exact setup/restoration bytes, all states restored, cleanup/Drop idempotence |
+| `existing_nonblocking_flags_are_preserved_without_claiming_changes` | T02/T10: both already-nonblocking descriptions avoid changes/restoration claims while termios/screen/notifications still restore |
+| `every_initialization_failure_restores_only_applicable_attempted_effects` | T10: failure at snapshot, notification preparation, raw, each flag mutation, dimensions, screen entry and cursor hide; prior attempted changes restored, later untouched changes unclaimed, primary diagnostic/status 1 after all applicable attempts |
+| `partial_screen_commands_are_recorded_even_when_the_remainder_fails` | T10: screen-entry/cursor-hide commands fail after four bytes and would-block; attempted changes undone with cancel-prefixed commands, all applicable OS states restored |
+| `interrupted_and_short_setup_writes_resume_without_repeating_emitted_bytes` | T10 setup-write portion: EINTR/short writes resume exact suffixes without duplicates |
+| `zero_write_is_fatal_and_still_restores_the_attempted_screen_change` | T10: zero output becomes WriteZero; attempted screen still left, saved OS states restored |
+| `small_and_resized_dimensions_are_not_session_failures` | T01/V05 session portions: other raw/non-UTF-8 TERM declaration accepted; zero/tiny/normal dimensions returned; resize does not fail the session |
+| `shutdown_statuses_and_runtime_failures_report_only_after_cleanup` | T09/T11 boundary portions: normalized Quit/Interrupt/Terminate choose 0/130/143; caller-supplied input/clock/output failures choose 1; complete restoration before ExitReport is returned. These caller-supplied errors do not establish actual runtime detection |
+| `multiple_cleanup_failures_preserve_selected_status_and_attempt_every_operation` | T13: five simultaneous screen/termios/flag failures; notification release still attempted; Quit promotes to 1, 130/143/1 preserved, each cleanup error diagnosed, no duplicate Drop attempts |
+| `cleanup_backpressure_is_bounded_and_does_not_skip_os_restoration` | T13: partial cursor-show then would-block/failed writability wait; alternate leave and every OS restoration still attempted; one cleanup error |
+| `interrupted_cleanup_wait_resumes_within_the_same_bounded_write` | T13: interrupted writability wait, partial write and repeated backpressure resume exact restoration bytes |
+| `drop_fallback_restores_an_owner_without_explicit_cleanup` | T10/T12: dropping an initialized owner performs every applicable restoration and releases notifications |
+| `drop_during_unwinding_survives_an_additional_restoration_panic` | T10/T12: owner drops while unwinding; a second panic in cursor restoration is caught without abort/double-panic escape; remaining states restore |
+| `pre_session_startup_errors_keep_argument_and_failure_statuses_without_effects` | A08 boundary portion: supplied selection/enumeration errors retain 2/1 with zero session effects. Actual discovery/error dispatch remains integration-owned |
+| `caught_initialization_runtime_and_cleanup_panics_restore_the_prior_hook` | T12/T13: unwinding during setup/runtime and two restoration panics; no previous-hook calls before restoration, chosen status retained, caught-panic/cleanup diagnostics returned, explicit subsequent panic invokes the restored prior hook |
+
+### Linux adapter evidence
+
+These three passing tests are under `terminal::linux::tests`; they supplement
+scripted logic evidence with native Linux operations, not the product PTY campaign.
+
+| Passing test | Applicable cases and observations |
+| --- | --- |
+| `full_pipe_and_collated_tokens_do_not_replace_atomic_signal_identity` | T06 adapter portion: fill pipe to EAGAIN, set INT/TERM/resize flags, drain to independently checked EAGAIN before flag handling; INT wins, resize consumed once, shutdown sticky and independent of token count |
+| `linux_adapter_raw_flags_and_dimensions_round_trip_on_owned_pty` | T02/V05 adapter portions: actual owned PTY cfmakeraw disables ISIG/canonical/echo/extensions/input/output translation, eight-bit mode and VMIN/VTIME; shared OFD nonblocking flags and 80x24→1x1 dimensions; termios fields/speeds/control bytes and exact original flags restored |
+| `registered_signals_wake_and_unregister_without_owned_fd_leaks` | T06 adapter portion: isolated test subprocess registers actual SIGWINCH/SIGTERM/SIGINT actions; raises signals synchronously, zero-time poll sees a pipe wake, INT wins and resize consumed; unregister closes reader/all owned FDs, frees flag registrations, subsequent WINCH no longer sets the detached flag, FD count returns to baseline |
+
+### Review and remaining integration evidence
+
+- Unsafe operations are confined to the concrete Linux adapter and its native
+  checks. Signal handlers use signal-hook atomic and Unix pipe actions with
+  disabled default features; flag-before-wake order follows the locked registry's
+  documented registration order. No thread/iterator, frame renderer, clock or
+  counter work occurs in the signal path.
+- The staged owner exists before snapshots/setup; notification actions are owned
+  before registration/mutation. Partial writes and syscall errors conservatively
+  claim attempts. Cleanup keeps output nonblocking for cancel/show/leave writes,
+  using finite 100-ms per-command retries, then attempts termios and each changed
+  flag regardless of earlier failures. Drop and per-operation panic catching
+  supply the best-effort fallback. Signal-hook unregister removes owned actions,
+  not the previous OS handler; the application returns normally to process exit.
+- The guarded closure covers startup and runtime; it returns diagnostics only
+  after explicit restoration and prior-hook restoration. Selected status 2 is
+  also representable for pre-session selection errors. The integration ticket
+  must place discovery/selection/init/execution inside that closure and emit
+  stderr after its return, without `process::exit`.
+- T01 informational exemptions/redirected stderr and real stream/status behavior
+  remain application/product-PTY work. T02 typed Ctrl+C/Ctrl+Z needs decoding and
+  integrated PTY behavior. T06 product idle-poll wake and loop shutdown priority,
+  T09 actual control/signal exits, T10 practical product initialization faults,
+  T11 real detection of runtime faults and T12 application boundary wiring remain
+  pending under the existing runtime/integration/PTY tickets.
+- T03–T05, T07–T08 and BOOTTIME/timerfd are not implemented by this session ticket.
+  T13 has scripted owner/boundary evidence; actual application use remains to be
+  verified. No full product P/E/L case is promoted by these adapter checks.
+- No contractual conflict, new domain decision or concrete corrective ticket
+  surfaced; the existing fog and downstream tickets remain applicable.
+
 ## Acceptance case ledger
 
 These are section 10 case identifiers, not issue references. Each future evidence
@@ -446,10 +549,14 @@ implementation. **No complete acceptance case is marked passing yet.**
 | S13 | Partial (proc shape reviewed) | Bulk traversal already reviewed; production clock/timerfd and conversion/failure fixtures pending |
 | V01–V04, V06–V08 | Screen module checks pass; final application use pending | Exact geometry/bar/state/name/overflow/unit/rounding/large-total fixtures mapped in the screen run above; V01 visual evidence pending with T14 |
 | V05 | Partial (screen/monitor checks pass) | Small/zero dimensions and continued pure sampling/navigation/history recovery pass; application quit/resize behavior, Linux PTY and recorded emulator evidence pending |
-| T01–T13 | Pending | Scripted terminal/event/integration and Linux PTY evidence not run |
+| T01–T02 | Partial (session/adapter checks pass) | Support pre-mutation scripts, owned Linux PTY raw/flags/dimensions round trip and notification-before-mutation pass; application informational/stream behavior, typed controls and product PTY evidence pending |
+| T03–T05 | Pending | Incremental input/timeout fixtures and integrated product input evidence pending |
+| T06 | Partial (signal adapter checks pass) | Full/collated pipe, drain-before-flag, simultaneous INT priority, actual registered-signal wake/unregister/FD lifetime pass; product loop and PTY evidence pending |
+| T07–T08 | Pending | Fairness/shutdown-first integration and resumable application frame checks pending |
+| T09–T13 | Partial (owner/exit-boundary checks pass) | Staged initialization/partial-write restoration, normalized statuses/error arbitration, multiple cleanup faults, panic-hook restoration and nonpanicking Drop pass; application runtime detection/boundary wiring and practical product PTY evidence pending |
 | T14 | Pending | Recorded emulator identity, visual protocols and handled-exit observations required; TERM declaration is insufficient |
 | D01 | Pending (intermediate commands pass) | Final application gates and authorized repository handoff still required; exact compiler/commands recorded above |
-| D02 | Partial (dependencies and arguments/proc/monitor/screen reviewed) | Graph/licenses, implemented pure selected-view/ASCII-rows contracts and production/scripted counter adapters reviewed; runtime/integration effects and final review pending |
+| D02 | Partial (dependencies and arguments/proc/monitor/screen/session reviewed) | Graph/licenses, pure view/rows, production/scripted counter and terminal session effects reviewed; remaining runtime/integration effects and final review pending |
 | D03 | Pending (foundation files reviewed; lockfile committed) | Identity, license, credit, instructions and compiler record reviewed above; Cargo.lock is in base revision 1977703; final artifact/revision review still required |
 | D04 | Pending | No nonprivileged live proc/interface/traffic UI smoke has been run |
 | D05 | Pending | Final implemented reference/departure and supersession review required |

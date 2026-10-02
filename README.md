@@ -8,9 +8,9 @@ Inspired by [nload](https://github.com/rolandriegel/nload) by Roland Riegel.
 
 The application runs a single-interface view with incoming/outgoing graphs,
 traffic statistics and arrow-key navigation through the startup interface list.
-Deterministic module/application-loop checks and automated Linux product PTY
-checks pass. Recorded emulator observations, live smoke and final artifact review
-are the next verification steps.
+Deterministic module/application-loop checks, automated Linux product PTY checks,
+recorded Alacritty emulator observations and nonprivileged live traffic smoke
+pass. Final acceptance gates and artifact review are the next verification step.
 
 ## Build and run
 

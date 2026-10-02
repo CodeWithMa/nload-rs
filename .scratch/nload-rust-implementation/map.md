@@ -33,6 +33,7 @@ A working Linux `nload-rs` application satisfying [Minimal Rust port of nload â€
 - [Implement incremental input and nonblocking runtime effects](issues/06-terminal-events.md#resolution--2026-10-02--alice): Bounded CSI/SS3 decoder, checked BOOTTIME/timerfd readiness and single-frame resumable nonblocking output implemented with shared scripted effects; 16 new checks and all 75 tests pass, with application fairness/sampling and product terminal evidence pending.
 - [Integrate startup, sampling and the interactive application loop](issues/07-application-integration.md#resolution--2026-10-02--alice): Working binary, guarded startup and shutdown-first anchored sampling/redraw loop integrated; 18 new fixtures and all 93 tests/build gates pass, unblocking product PTY verification.
 - [Verify the real binary through automated Linux PTY checks](issues/08-linux-pty.md#resolution--2026-10-02--alice): Eleven real-product PTY checks pass against debug/release, covering retained OS-state restoration and practical faults; all 104 tests/build gates pass, unblocking recorded emulator/live smoke.
+- [Record emulator behavior and nonprivileged live traffic smoke](issues/09-emulator-live-smoke.md#resolution--2026-10-02--alice): Human Alacritty observations pass layout/navigation/small-mode history recovery and q/Ctrl+C/SIGTERM visual cleanup; nonprivileged live traffic passes, unblocking final acceptance audit.
 
 ## Not yet specified
 

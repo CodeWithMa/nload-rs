@@ -890,12 +890,109 @@ evidence under the specification's practicality rule. E evidence for V05/T14,
 L evidence for D04 and final B/revision review remain pending. No corrective
 blocker, new domain decision or newly specifiable fog surfaced.
 
+## Emulator and live smoke preparation — 2026-10-02
+
+Scope: [Record emulator behavior and nonprivileged live traffic smoke](issues/09-emulator-live-smoke.md).
+Assets: [Emulator and live traffic smoke checklist and record](emulator-live-smoke.md),
+[Nonprivileged loopback traffic source](loopback-traffic.py).
+
+- Source revision: `c018e0279a66df8121195a449bcd0f63c03496ee`; clean worktree
+  before claiming. No production source/dependency changes. Checklist, helper
+  and tracker/evidence additions are uncommitted.
+- `cargo build --release --locked` passes, with the existing unused Session
+  convenience-method warning. Direct `./target/release/nload-rs --version`
+  passes, printing `nload-rs 0.1.0\n`. Release SHA-256 is
+  `7ad245c475a9a29c3abac31b8f7e69d8ef6c06b216d20a9cebc21a4fefd998c1`,
+  identical to the earlier product PTY-tested executable.
+- Reconfirmed rustc 1.98.1 (`48a229ceaefd4985c50990b14116b6d856af0985`),
+  Cargo 1.98.0, host/target `x86_64-unknown-linux-gnu`; Linux 7.2.8,
+  Python 3.14.7; UID/EUID 1000/1000. Agent stdin/stdout are nonterminal.
+  TERM declares alacritty, but no actual emulator identity/version or visible
+  behavior was observed. Detailed environment is in the linked record.
+- Live proc discovery contains `docker0`, `enp1s0`, `lo` in expected natural
+  startup order. The checklist uses `lo`, with `-i 20480 -o 5120`, expecting
+  independent 20.00/5.00 MBit/s ceiling labels. These UI observations await the human.
+- `python3 .scratch/nload-rust-implementation/loopback-traffic.py --phase-seconds 0.5`
+  passes: 160 actual UDP send/receive pairs over 3.002 seconds; lo RX/TX each
+  advanced from 0 to 1,315,200 bytes. This is supporting traffic-source/proc
+  evidence, not passing D04 application UI evidence or an exact rate oracle.
+- `git diff --check` passes. Production source is unchanged; no new Rust-test
+  repetition is required for checklist/helper preparation. Final required gates
+  still belong to final acceptance.
+
+**Pending:** human-recorded emulator identity/environment/dimensions, actual
+layout/navigation/ceilings, live totals/rates/graphs, small startup/shrink/grow
+retained history, and separate q/Ctrl+C/SIGTERM statuses/prior-screen/cursor
+observations. V05/T14 E and D04 L are not promoted to passing. The HITL ticket
+remains open; no corrective failure or newly specifiable fog has surfaced.
+
+## Recorded emulator and live smoke — 2026-10-02
+
+Scope: [Record emulator behavior and nonprivileged live traffic smoke](issues/09-emulator-live-smoke.md).
+Detailed observations/transcript:
+[Emulator and live traffic smoke checklist and record](emulator-live-smoke.md#observations-to-return).
+
+The human completed the three checklist runs and answered both follow-up
+clarifications. This is human-recorded visual evidence, not an agent's inference
+from TERM or PTY bytes. Source revision remains
+`c018e0279a66df8121195a449bcd0f63c03496ee`; release executable SHA-256
+`7ad245c475a9a29c3abac31b8f7e69d8ef6c06b216d20a9cebc21a4fefd998c1`
+was rechecked and still matches the prior PTY-tested build. Production source,
+dependencies and lockfile are unchanged; these uncommitted changes add smoke
+assets and update documentation/tracker/evidence.
+
+### Actual environment and observations
+
+- Emulator: **Alacritty 0.17.0 (`94e7c887`)**, SSH terminal `/dev/pts/3`.
+  TERM=`alacritty`, LANG=`en_US.UTF-8`, SSH_TTY=`/dev/pts/3`;
+  COLORTERM, TERM_PROGRAM, TERM_PROGRAM_VERSION, LC_ALL, TMUX and STY unset.
+  Client OS not supplied. Linux/toolchain/server environment is recorded in
+  preparation above.
+- Initial actual dimensions **86x22** (`stty size`: `22 86`). Run A ended
+  small at **92x8**; Run B started small at **92x7**. Exact grown dimensions
+  not supplied; the human confirmed full-layout/history recovery on growth.
+- Run A steps 1–3 “All OK”: actual default discovery/selection, stacked
+  incoming/outgoing layout and fields, independent **20.00/5.00 MBit/s**
+  ceiling labels, prompt Right/Down/Right/Up/Left/Down selection and wrapping.
+  Run B steps 1–3 “all good”: explicit `lo` selection, valid small startup,
+  small-mode sampling/navigation and recovered full layout/history on growth.
+- Nonprivileged local UDP traffic helper ran at UID/EUID 1000/1000 for
+  **60.002 seconds**, receiving **3,170 datagrams**. Actual proc RX and TX
+  each advanced **1,315,200 → 27,372,600 bytes**, delta **26,057,400** each.
+  The human confirmed live totals/rate/bar activity; supplied UI notes show
+  Avg approximately 900 kBit/s, Min 0, Max **7.97 MBit/s**, Ttl **26.10 MByte**.
+  The initial `797 MBit/s` note was explicitly corrected by the human as an
+  omitted decimal. Direction and exact separate before/after UI values were
+  not supplied. Live rates are observations, not an exact numerical oracle.
+- Run A shrink/grow: “history still there, warning shows and navigation on
+  warning works”; “making window larger shows older traffic”.
+- Separate q/typed Ctrl+C/external SIGTERM runs report statuses **0/130/143**.
+  Cursor and normal typing work after each. Asked explicitly whether the prior
+  shell screen returned after each exit, the human answered **“Yes, all three.”**
+  SIGTERM targets the release child via the checklist's fifteen-second wrapper.
+- No failure or skipped step reported. No corrective work or new specifiable
+  fog surfaced. Documentation whitespace checks pass; final required application
+  gates/artifact audit remain assigned to the next ticket.
+
+### Acceptance mapping
+
+| Case | Actual evidence and outcome |
+| --- | --- |
+| V05 E | **Pass:** real below-height-floor startup/shrink, warning/navigation/continued history, quit while small and successful growth/history recovery |
+| T14 E | **Pass:** named/versioned emulator, visible stacked layout/prompt selection/graph recovery, prior screen and cursor restored after separate q/Ctrl+C/SIGTERM |
+| D04 L | **Pass:** direct release binary, actual proc discovery/selection/navigation, independent ceilings and nonprivileged traffic with live totals/rates/graphs |
+
+These observations also supply the visual aspects referenced by A11, V01 and
+T09. They do not replace earlier exact deterministic/PTY evidence. Final
+build/artifact/revision acceptance remains pending.
+
 ## Acceptance case ledger
 
 These are section 10 case identifiers, not issue references. Each future evidence
 entry must give actual test names or recorded manual observations, not an intended
 implementation. Deterministic evidence now passes for the integrated application;
-remaining PTY/emulator/live and final build/artifact-review obligations stay explicit.
+practical product PTY and human emulator/live checks pass. Final build/artifact-review
+obligations stay explicit.
 The parent effort's acceptance remains open.
 
 | Cases | Latest status | Evidence / remaining work |
@@ -904,33 +1001,31 @@ The parent effort's acceptance remains open.
 | A04–A06 | D passes | Raw selection/full membership, before/after-name options, independent/global ceilings, limits/repetition/zero and grammar/no-effect dispatch pass |
 | A07 | D passes; final B review pending | Application startup fixture passes under set/unset HOME and differing locale; source contains no configuration access |
 | A08–A10 | D passes | Distinct discovery/selection/clock failures, natural ordering, exact effect order, baseline reuse/completion timestamp and long-initialization anchored deadline fixtures pass |
-| A11 | D passes; T03 real input passes; T14 visual pending | Symmetric arrows/wrapping/singleton, aliases ignored, zero acquisition/sample/reset effects and prompt redraw fixtures pass; fragmented/repeated product CSI/SS3 input passes |
+| A11 | D passes; T03 real input and T14 visual pass | Symmetric arrows/wrapping/singleton, aliases ignored, zero acquisition/sample/reset effects and prompt redraw fixtures pass; fragmented/repeated product CSI/SS3 input and human all-four-arrow navigation pass |
 | A12 | D passes | Module and loop removal/rename/addition/failure/return cases retain membership/selection and reset to baseline without bridging gaps |
 | S01–S05 | D passes | Complete proc/EOF/fresh traversal and exact numerical fixtures above, with quiet nonfatal failure/absence behavior connected in the application |
 | S06–S07 | D passes; S06 final B review pending | Actual intervals/nonpositive observations, BOOTTIME/timerfd native checks, anchored completion deadlines/missed slots, one delayed sample and first-future checked arithmetic pass |
 | S08–S12 | D passes | Exact deltas/extrema/resets/off-screen history/boundary expiry/resize rendering pass; loop also preserves actual history through small-mode sampling/navigation/growth |
 | S13 | D and intermediate B review pass; final B review pending | Owned BOOTTIME/timerfd and checked conversions/effect faults, bulk traversal and application completion timestamps pass |
-| V01–V04, V06–V08 | D passes; V01 visual evidence pending in T14 | Exact pure screen geometry/bar/state/name/overflow/unit/rounding/large-value fixtures pass and rows are connected to runtime frames |
-| V05 | D/P pass; E pending | Exact scripted history recovery plus product small startup/sampling/navigation/resize/quit/bounded rows pass; visible emulator recovery still required |
+| V01–V04, V06–V08 | D passes; V01 visual evidence passes in T14 | Exact pure screen geometry/bar/state/name/overflow/unit/rounding/large-value fixtures pass and rows are connected to runtime frames; human confirms stacked layout/fields/labels |
+| V05 | D/P/E pass | Exact scripted history recovery and product bounded rows pass; human confirms real small startup/sampling/navigation/quit and visible shrink/grow/history recovery |
 | T01–T04 | D/P pass | Real product support rejection/informational exemptions, raw mode/shared OFD flags, typed controls, fragmented/repeated arrows and ignored sequences pass against debug/release |
 | T05 | D passes | Exact idle/buffering module fixtures and integrated parser wait/timeout-without-acquisition pass |
 | T06 | D/P and intermediate B review pass; final B pending | Product external signals, queued INT/TERM arbitration and backpressured shutdown pass; private full-pipe/drain semantics backed by native/scripted evidence |
 | T07–T08 | D passes | Bounded batches, due-before-next-input fairness, shutdown priority, coalesced dirty redraw, untouched replacement/partial resumption and continuing actual acquisitions under EAGAIN pass |
 | T09–T11 | D and practical product P pass | Debug/release normal exits and retained OS/protocol restoration, real setup EBADF/EAGAIN, EOF and independent hangups pass; stage/short-write/clock-fault limitations explicitly mapped above |
 | T12–T13 | D passes; T12 final B review pending | Application startup/runtime panics use guarded cleanup; prior hook restored/nonpanicking fallback verified; actual loop exits with multiple cleanup failures choose/preserve required statuses |
-| T14 | Pending | Recorded emulator identity, visual protocols and handled-exit observations required; TERM declaration is insufficient |
+| T14 | E passes | Alacritty 0.17.0 human observations confirm layout/prompt navigation/history recovery and prior-screen/visible-cursor/typing restoration after q/Ctrl+C/SIGTERM with statuses 0/130/143 |
 | D01 | Pending (intermediate commands pass) | Final application gates and authorized repository handoff still required; exact compiler/commands recorded above |
 | D02 | Intermediate review passes; final B review pending | Graph/licenses, five deep modules and application connections, production/scripted effect seams, pure views/rows and adapter-only unsafe reviewed |
 | D03 | Intermediate files reviewed; final B review pending | Working invocation/controls/build docs, Cargo-derived identity/version, license, credit, compiler and committed Cargo.lock established; final artifact/revision review required |
-| D04 | Pending | No nonprivileged live proc/interface/traffic UI smoke has been run |
+| D04 | L passes | Human direct-release discovery/explicit selection/navigation, independent 20.00/5.00 MBit/s ceilings and actual nonprivileged loopback traffic with advancing totals/rates/graphs recorded above |
 | D05 | Pending | Final implemented reference/departure and supersession review required |
 
 ## Outstanding verification
 
 - Final deterministic coverage/artifact review against every specification section;
   current module and application mappings/checks pass as recorded above.
-- Human-recorded xterm-compatible emulator observations and nonprivileged live
-  smoke; neither is replaced by redirected informational/nonterminal execution.
 - Final source/artifact review, required command gates and authorized final
   implementation revision. Cargo.lock is already committed in the foundation;
   the intermediate results alone do not satisfy

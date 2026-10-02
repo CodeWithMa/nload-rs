@@ -1,0 +1,10 @@
+[package]
+name = "nload-rs"
+version = "0.1.0"
+edition = "2024"
+description = "A Linux single-interface network traffic monitor inspired by nload"
+license = "GPL-2.0-only"
+
+[dependencies]
+libc = "=0.2.189"
+signal-hook = { version = "=0.4.4", default-features = false }

@@ -362,3 +362,9 @@ impl Drop for QuietHook {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod scripted;
+
+#[cfg(test)]
+pub(crate) static HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

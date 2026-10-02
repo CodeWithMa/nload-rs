@@ -639,50 +639,167 @@ that same drain-before-flags implementation; it does not interpret signal bytes.
 - No new product/domain decision, specification conflict or concrete corrective
   ticket surfaced. Existing downstream tickets and map fog remain applicable.
 
+## Application integration run — 2026-10-02
+
+Scope: [Integrate startup, sampling and the interactive application loop](issues/07-application-integration.md).
+
+### Revision, environment and commands
+
+- Base revision: `fa03cdd22ce8bbcdc5f281db90dc6fb82e596e58`; the worktree was
+  clean before claiming the ticket. Tested implementation is the uncommitted
+  application/main wiring, application fixtures and terminal test-adapter/hook-lock
+  changes on that base, plus the updated README. No commit was made.
+- Compiler reconfirmed: rustc **1.98.1**, commit
+  `48a229ceaefd4985c50990b14116b6d856af0985`, host/target
+  `x86_64-unknown-linux-gnu`, LLVM 21.1.8. Cargo **1.98.0**, commit
+  `797e8a9bca276c1c9f9f738d2a20f484fa4eea9d`, NixOS 26.11.0.
+  Kernel: `Linux nixos-dev 7.2.8 #1-NixOS SMP PREEMPT_DYNAMIC Fri Sep 25
+  14:37:14 UTC 2026 x86_64 GNU/Linux`.
+- Manifest, dependencies and committed lockfile are unchanged. The dependency/
+  license review above continues to describe the actual graph; final review is
+  still owned by the final-acceptance ticket.
+- All commands ran from the repository root. Tests use explicit BOOTTIME integers,
+  acquisition durations, readiness and effect failures. No sleeps or private
+  monitor queues are used as oracles.
+
+| Command/check | Actual outcome |
+| --- | --- |
+| `cargo fmt && cargo test --locked application::tests` (final focused run) | Exit 0; **18 passed**, 75 unrelated tests filtered out |
+| `cargo fmt --check` | Exit 0 |
+| `cargo test --locked` | Exit 0; **93 passed**, 0 failed/ignored |
+| `cargo build --release --locked` | Exit 0; real application binary produced; one dead-code warning for Session dimension/notification convenience methods, whose production paths are accessed through Runtime |
+| `env -u HOME LC_ALL=C ./target/debug/deps/nload_rs-ed75f073191bbfc4 application::tests::startup_reuses_discovery_and_orders_clock_before_terminal_mutation --exact` | Exit 0; 1 passed, 92 filtered out |
+| `env HOME=/tmp/opencode LC_ALL=en_US.utf8 ./target/debug/deps/nload_rs-ed75f073191bbfc4 application::tests::startup_reuses_discovery_and_orders_clock_before_terminal_mutation --exact` | Exit 0; identical startup/default/list/view fixture, 1 passed, 92 filtered out |
+| Direct release binary, subprocess-captured streams with TERM unset: `--version`, `--help`, `--unknown`, no arguments | Checks exit 0: version status 0/exact `nload-rs 0.1.0\n`/empty stderr; help status 0/721 stdout bytes/required usage/empty stderr; unknown option status 2/empty stdout/stderr diagnostic; interactive nonterminal status 1/empty stdout/`interactive stdin and stdout must be terminals` diagnostic |
+| `git diff --check` | Exit 0; no tracked whitespace diagnostics |
+
+Early fixture development had two compiler errors from consuming an owned saved
+view before subsequent harness assertions; those assertions now borrow the view.
+The first compiled focused run passed 14/16: a failed cursor-hide *attempt* correctly
+requires cursor-show cleanup, and a 300-byte input fixture left unread suffixes
+ahead of its scripted quit. Corrected expectations and 255-byte sustained batches
+passed 16/16. Adding shared ordering/diagnostic checks and two integration cases
+then passed 18/18; the full final gates above ran on those final sources.
+
+These Git blob identities identify the exact tested source without claiming an
+implementation commit (computed with `git hash-object` in the listed order):
+
+| File | Tested blob |
+| --- | --- |
+| `src/main.rs` | `2e198d9d7e5785ae87a230e0fc3e412eb556fd30` |
+| `src/application.rs` | `489bab1a8586acd0c192444b6fd7e95ddb114be9` |
+| `src/application/tests.rs` | `18ae130b1b0967190d3fead90b38f04b5d29b337` |
+| `src/terminal.rs` | `6d89ef529bc248d3ba33fa215cc3578d985dae39` |
+| `src/terminal/session.rs` | `0689f772e338f6f7890c8a285b5d45c12a4d2617` |
+| `src/terminal/session/scripted.rs` | `0668feab96681dc6c2522a02c37750bc9617ef1b` |
+| `src/terminal/session/tests.rs` | `80de527347b6059f10876a3588aef5291995aedc` |
+| `README.md` | `c45bd199389aae888d844cebe4e0950940f83506` |
+
+### Deterministic integration case-to-test evidence
+
+All names below are actual passing tests under `application::tests`. They cross
+`invoke`, the same guarded startup function as production, and/or the same
+`drive` loop with scripted counter/clock/terminal adapters. Saved monitor assertions
+use selected views only. The scripted stderr writer asserts notification release
+has already occurred before writing any diagnostic after notification setup.
+
+| Passing test | Applicable cases and observations |
+| --- | --- |
+| `informational_and_syntax_paths_have_correct_streams_status_and_zero_effects` | A01–A03/A06/T01: exact informational output, argument diagnostics/statuses, aliases/combinations/range/grammar errors; interactive effects never called, no counter/clock/session work |
+| `startup_errors_stop_before_terminal_validation_and_remain_distinct` | A04/A08/S13: missing exact selection status 2; empty/read/parse/clock-init/completion-clock failures status 1 with distinct diagnostics and no terminal effects |
+| `startup_reuses_discovery_and_orders_clock_before_terminal_mutation` | A07/A09/A10: shared effect log proves clock initialization→initial clock read→snapshot→completion timestamp→support/snapshot/notifications→mutation; natural default selection/full membership, original discovery totals/no graph column, exactly one acquisition, deadline completion+500 ms; HOME/locale variants above |
+| `raw_selection_and_ceiling_options_reach_the_fixed_monitor` | A04–A06: non-UTF-8 exact selection, leading-dash name after `--`, options before/after name, repeated/leading-zero/direction-local zero behavior, minimum/maximum valid ceilings, navigation retaining complete membership and global independent ceilings |
+| `slow_initialization_and_slow_acquisition_skip_slots_use_completion_and_actual_time` | A10/S06/S07/S13: two-second UI setup plus one-second acquisition; one overdue round, completion timestamp at three seconds, actual 1,000 bytes/s/one column and next anchored deadline at 3.5 seconds |
+| `navigation_resize_and_parser_timeout_redraw_without_acquisition` | A11/S12/T03–T05: CSI/SS3 forward/reverse arrows and excluded aliases/modified keys, prompt full-size selection frame after small/resize/timeout operations; only discovery acquisition, no graph samples, parser idle deadline monitored in waits |
+| `sustained_bounded_input_rechecks_due_acquisition_before_next_batch` | T07/A11/S07: 255-byte arrow batches, time becoming due during a read, acquisition before the following read, continued due sampling, every read bounded to 256 bytes |
+| `shutdown_preempts_due_sampling_input_resize_and_rendering` | T06/T07/T09: pending initial signals and simultaneous signal/input/output/timer wakes; INT/TERM statuses 130/143; no due acquisition, read, resize or frame output after pending shutdown; full cleanup |
+| `runtime_failure_absence_addition_and_return_are_quiet_nonfatal_fixed_membership` | A12/S02/S10: valid absent versus global parse/read failure, fixed A/B entries despite additions/rename targets, exact unavailable frame statuses, quiet continuation/retry and higher-counter return baseline/no bridged samples |
+| `backpressure_and_partial_frames_preserve_sampling_and_latest_redraw` | T07/T08: EAGAIN permits untouched baseline replacement, four-byte emitted prefix pins the old selected frame, another EAGAIN does not stop actual acquisition/navigation, old frame finishes before latest measured state; exactly two frames/no duplicate prefixes and real off-screen sample |
+| `blocked_output_still_handles_shutdown_without_an_extra_sample_or_write` | T06–T08: output remains blocked when shutdown/deadline coincide; no further sample/write, chosen 130 and cleanup |
+| `shutdown_arriving_during_acquisition_stops_before_input_or_frame_work` | T06/T07: signal injected during an already-started counter round is inspected at completion; no subsequent input, resize or output work; status 130 and cleanup |
+| `small_session_keeps_offscreen_sampling_and_recovers_real_history_on_growth` | A11/S11/S12/V05: start 10x3, navigate and sample while small, grow to 80x24 with the selected off-screen entry's two actual timestamped columns/current numeric value; quit/cleanup remain available |
+| `actual_loop_runtime_faults_restore_before_reporting` | S13/T11: actual loop detects EOF, poll/output/clock/resize/notification errors and returns fatal 1 with complete cleanup before diagnostics |
+| `initialization_and_caught_startup_runtime_panics_use_the_guarded_application_path` | T10/T12: each setup-effect failure is propagated; counter startup/runtime and cursor-hide panics go through the production guarded path, return caught-panic diagnostic/status 1 and perform applicable restoration |
+| `real_loop_quit_interrupt_term_and_cleanup_fault_arbitration` | T09/T13: actual decoded q/Q/Ctrl+C and normalized external INT/TERM; five cleanup failures all attempted, q/Q become 1 while 130/143 remain, five diagnostics after attempts |
+| `unsupported_interactive_session_is_rejected_after_discovery_before_mutation` | T01/A10: discovery completed before support validation; rejected session has only support read, no mutation and stderr/status 1 |
+| `deadline_overflow_is_fatal_before_mutation_or_after_one_delayed_acquisition` | S07/S13/T11: checked initial and first-future deadline arithmetic near u64 maximum fail rather than wrap; runtime failure restores the session |
+
+The existing passing argument/proc/monitor/screen/runtime/session fixtures supply
+the remaining exact numerical, natural-order, parser, simultaneous-INT/TERM-flag,
+partial-setup-write, exhaustive restoration and prior-panic-hook checks described
+above. Application checks now establish their orchestration, not a replacement
+for their detailed fixtures or for real product terminal evidence.
+
+### Implementation review and remaining acceptance
+
+- [Main](../../src/main.rs) uses `args_os`, ordinary `ExitCode` return and the
+  application dispatch; it no longer runs a scaffold diagnostic. Informational
+  dispatch finishes before creating any interactive adapters.
+- [Application](../../src/application.rs) owns scheduling/redraw only. Its guarded
+  startup creates the BOOTTIME clock before bulk discovery, timestamps completion,
+  sorts/selects once, reuses that snapshot for all baselines, then initializes
+  the terminal. Production execution borrows the owned session/clock runtime.
+- Every loop batch inspects drain-before-flags notifications before checking
+  deadlines. Due rounds traverse proc once, timestamp completion, and skip to the
+  first future anchored slot. Input has bounded reads; resize/navigation/parser
+  processing never requests acquisition. Shutdown is checked after acquisition
+  and between bounded work; dirty redraws coalesce behind the single resumable
+  Runtime frame. No clock fallback, thread or new dependency was introduced.
+- Application and scripted adapters contain no unsafe operations. SessionOps is
+  re-exported internally to express the generic startup seam, not as a public
+  library. The existing process-global panic-hook tests and new application tests
+  share a mutex; production still installs the guard once on its single thread.
+  Diagnostics are written only after guarded cleanup/hook restoration returns.
+- README now documents the working invocation, controls and independent ceiling
+  overrides and accurately identifies the outstanding verification.
+- Product Linux PTY checks, recorded emulator observations and nonprivileged live
+  smoke are **pending**, as is final revision/artifact acceptance. The redirected
+  subprocess checks are direct Linux execution but not interactive/live evidence.
+  No new contractual conflict, domain decision or corrective ticket surfaced.
+
 ## Acceptance case ledger
 
 These are section 10 case identifiers, not issue references. Each future evidence
 entry must give actual test names or recorded manual observations, not an intended
-implementation. **No complete acceptance case is marked passing yet.**
+implementation. Deterministic evidence now passes for the integrated application;
+remaining PTY/emulator/live and final build/artifact-review obligations stay explicit.
+The parent effort's acceptance remains open.
 
 | Cases | Latest status | Evidence / remaining work |
 | --- | --- | --- |
-| A01–A03 | Partial (module checks pass) | Informational outcomes/text and strict grammar tests mapped above; application streams/status/no-effect tests pending |
-| A04–A06 | Partial (module checks pass) | Raw names, selection, independent ceilings and range/grammar tests above; monitor confirms global independent ceilings after navigation and uncapped rates; application dispatch/no-effects pending |
-| A07 | Partial (module checks/review pass) | Pure defaults/selection tests pass with set/unset HOME; no configuration I/O in these modules; complete application view/artifact review pending |
-| A08–A09 | Partial (module checks pass) | Complete snapshot errors versus empty/missing selection; natural raw-byte order/long digit/locale and fixed monitor membership pass; application dispatch/use pending |
-| A10 | Pending | Startup effect ordering and clock/deadline anchoring pending; Monitor supports discovery-data baselines without redundant acquisition |
-| A11 | Partial (monitor/runtime checks pass) | Symmetric wrapping, singleton, view/history/statistics invariance and ordered decoded arrows/ignored aliases pass; prompt redraw/no-effect loop assertions and product input/visual evidence pending |
-| A12 | Module fixtures pass; application use pending | Combined snapshot/monitor raw-name removal/rename/additions/return, fixed membership/selection, navigable unavailability and new-run baseline checks pass |
-| S01 | Module checks pass; final application use pending | Whole-snapshot raw/max-u64/field tests, large chunked EOF/fresh acquisition tests and production reopen review above |
-| S02 | Partial (acquisition/monitor checks pass) | Global read/parse failure versus valid absence, paired reset, unavailable totals and baseline return pass; nonfatal quiet application continuation pending |
-| S03–S05 | Module checks pass; final application use pending | Warm-up/totals/independent directions and exact/partial current/average numerical examples pass |
-| S06–S07 | Partial (monitor/runtime checks pass) | Actual-time intervals, ignored nonpositive rounds, no catch-up graph columns, BOOTTIME clock and absolute one-shot timerfd pass; acquisition timestamps, anchored missed-slot/first-future deadlines and application integration pending |
-| S08–S11 | Module checks pass; final application use pending | Exact deltas/totals, unrounded run extrema/idle/window expiry, both counter-decrease resets, failures/return and never-viewed history pass |
-| S12 | Monitor/screen module checks pass; application use pending | Exact-boundary expiry, actual fitting history rows, real zero columns, shrink/grow recovery and repeated redraw/view invariance pass; terminal/application resize behavior pending |
-| S13 | Partial (proc/runtime checks and review pass) | Bulk traversal, owned BOOTTIME/timerfd, checked conversion and clock/FD failure fixtures pass; application acquisition-completion timestamp use and final seam review pending |
-| V01–V04, V06–V08 | Screen module checks pass; final application use pending | Exact geometry/bar/state/name/overflow/unit/rounding/large-total fixtures mapped in the screen run above; V01 visual evidence pending with T14 |
-| V05 | Partial (screen/monitor checks pass) | Small/zero dimensions and continued pure sampling/navigation/history recovery pass; application quit/resize behavior, Linux PTY and recorded emulator evidence pending |
-| T01–T02 | Partial (session/adapter checks pass) | Support pre-mutation scripts, owned Linux PTY raw/flags/dimensions round trip and notification-before-mutation pass; application informational/stream behavior, typed controls and product PTY evidence pending |
-| T03–T05 | Runtime module fixtures pass; application/product input evidence pending | All CSI/SS3 fragmentation, repeats/order, modified/unknown sequence consumption, quit controls, constant-size parser, exact idle boundaries and wait deadlines pass; product PTY input and final application use pending |
-| T06 | Partial (signal/runtime adapter checks pass) | Full/collated pipe, drain-before-flag, simultaneous INT priority, registered-signal wake/unregister/FD lifetime and native poll wake under backpressure pass; product loop and PTY evidence pending |
-| T07 | Pending (bounded runtime batches established) | One-read/one-write batches provide the loop seam; shutdown-first ordering, due sampling and sustained-input/resize fairness integration pending |
-| T08 | Partial (scripted/native runtime checks pass) | Untouched-only replacement, exact partial suffix resumption, bounded writes and continued clock/input/signal/timer availability under real/scripted EAGAIN pass; continuing application sampling/redraw coalescing under backpressure pending |
-| T09–T13 | Partial (owner/runtime/exit-boundary checks pass) | Staged restoration, normalized control/status arbitration, detected clock/EOF/hangup/I/O faults, multiple cleanup faults, panic-hook restoration and nonpanicking Drop pass; application boundary/propagation wiring and practical product PTY evidence pending |
+| A01–A03 | D passes; A01 final B review pending | Module text/grammar and application streams/status/zero-effect fixtures pass; redirected release help/version/invalid invocation checks also pass |
+| A04–A06 | D passes | Raw selection/full membership, before/after-name options, independent/global ceilings, limits/repetition/zero and grammar/no-effect dispatch pass |
+| A07 | D passes; final B review pending | Application startup fixture passes under set/unset HOME and differing locale; source contains no configuration access |
+| A08–A10 | D passes | Distinct discovery/selection/clock failures, natural ordering, exact effect order, baseline reuse/completion timestamp and long-initialization anchored deadline fixtures pass |
+| A11 | D passes; real input/visual evidence pending in T03/T14 | Symmetric arrows/wrapping/singleton, aliases ignored, zero acquisition/sample/reset effects and prompt redraw fixtures pass |
+| A12 | D passes | Module and loop removal/rename/addition/failure/return cases retain membership/selection and reset to baseline without bridging gaps |
+| S01–S05 | D passes | Complete proc/EOF/fresh traversal and exact numerical fixtures above, with quiet nonfatal failure/absence behavior connected in the application |
+| S06–S07 | D passes; S06 final B review pending | Actual intervals/nonpositive observations, BOOTTIME/timerfd native checks, anchored completion deadlines/missed slots, one delayed sample and first-future checked arithmetic pass |
+| S08–S12 | D passes | Exact deltas/extrema/resets/off-screen history/boundary expiry/resize rendering pass; loop also preserves actual history through small-mode sampling/navigation/growth |
+| S13 | D and intermediate B review pass; final B review pending | Owned BOOTTIME/timerfd and checked conversions/effect faults, bulk traversal and application completion timestamps pass |
+| V01–V04, V06–V08 | D passes; V01 visual evidence pending in T14 | Exact pure screen geometry/bar/state/name/overflow/unit/rounding/large-value fixtures pass and rows are connected to runtime frames |
+| V05 | D passes; P/E pending | Small-mode actual loop sampling/navigation/quit and growth/history recovery pass; product PTY and emulator evidence required |
+| T01–T04 | D passes; P pending | Existing support/raw/decoder fixtures and integrated informational/no-effect/support/typed-control handling pass; native adapter checks are not product PTY acceptance |
+| T05 | D passes | Exact idle/buffering module fixtures and integrated parser wait/timeout-without-acquisition pass |
+| T06 | D and intermediate B review pass; P/final B pending | Drain-before-flags/full-pipe/simultaneous-INT arbitration and native wake checks pass; integrated pending/during-acquisition/backpressured shutdown passes |
+| T07–T08 | D passes | Bounded batches, due-before-next-input fairness, shutdown priority, coalesced dirty redraw, untouched replacement/partial resumption and continuing actual acquisitions under EAGAIN pass |
+| T09–T11 | D passes; practical product P pending | Actual loop controls/failure propagation, staged/partial initialization and exhaustive restoration before diagnostics pass |
+| T12–T13 | D passes; T12 final B review pending | Application startup/runtime panics use guarded cleanup; prior hook restored/nonpanicking fallback verified; actual loop exits with multiple cleanup failures choose/preserve required statuses |
 | T14 | Pending | Recorded emulator identity, visual protocols and handled-exit observations required; TERM declaration is insufficient |
 | D01 | Pending (intermediate commands pass) | Final application gates and authorized repository handoff still required; exact compiler/commands recorded above |
-| D02 | Partial (dependencies and five module implementations reviewed) | Graph/licenses, pure view/rows, production/scripted counter/clock/terminal effects and adapter-only unsafe reviewed; application connections and final artifact review pending |
-| D03 | Pending (foundation files reviewed; lockfile committed) | Identity, license, credit, instructions and compiler record reviewed above; Cargo.lock is in base revision 1977703; final artifact/revision review still required |
+| D02 | Intermediate review passes; final B review pending | Graph/licenses, five deep modules and application connections, production/scripted effect seams, pure views/rows and adapter-only unsafe reviewed |
+| D03 | Intermediate files reviewed; final B review pending | Working invocation/controls/build docs, Cargo-derived identity/version, license, credit, compiler and committed Cargo.lock established; final artifact/revision review required |
 | D04 | Pending | No nonprivileged live proc/interface/traffic UI smoke has been run |
 | D05 | Pending | Final implemented reference/departure and supersession review required |
 
 ## Outstanding verification
 
-- Complete deterministic case-to-test mappings and required application behavior.
+- Final deterministic coverage/artifact review against every specification section;
+  current module and application mappings/checks pass as recorded above.
 - Automated Linux PTY checks with actual OS-state restoration evidence, including
   practical real faults and explicit limitations backed by scripted tests.
 - Human-recorded xterm-compatible emulator observations and nonprivileged live
-  smoke; neither is replaced by this scaffold's direct execution.
+  smoke; neither is replaced by redirected informational/nonterminal execution.
 - Final source/artifact review, required command gates and authorized final
   implementation revision. Cargo.lock is already committed in the foundation;
   the intermediate results alone do not satisfy

@@ -4,12 +4,10 @@ use super::*;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // guarded owns a process-global hook. Serialize tests that install hooks; the
 // production application invokes it once in its single main thread.
-static HOOK_LOCK: Mutex<()> = Mutex::new(());
 const INPUT_FLAGS: i32 = libc::O_APPEND;
 const OUTPUT_FLAGS: i32 = libc::O_ASYNC;
 

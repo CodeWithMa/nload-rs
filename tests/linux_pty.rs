@@ -701,15 +701,26 @@ fn backpressured_runtime_still_handles_quit_and_signal_with_bounded_cleanup() {
         product.output.resize(1000, 1000);
         product.signal(libc::SIGWINCH);
         wait_backpressure(&product);
+        // No POLLOUT does not guarantee the tiny restoration writes will fail:
+        // the kernel can move queued bytes to the master and free slave space.
+        // Freeze output after observing real runtime backpressure so cleanup
+        // must exercise its bounded failure path on every kernel/schedule.
+        // SAFETY: live output terminal and valid tcflow action.
+        checked(unsafe { libc::tcflow(product.output.slave.as_raw_fd(), libc::TCOOFF) });
         if let Some(signal) = signal {
             product.signal(signal);
         } else {
             product.send(b"q");
         }
         let stderr = product.finish(status, false);
-        assert!(stderr.contains("show cursor"));
-        assert!(stderr.contains("leave alternate screen"));
+        assert!(stderr.contains("show cursor"), "stderr: {stderr}");
+        assert!(
+            stderr.contains("leave alternate screen"),
+            "stderr: {stderr}"
+        );
         product.input.assert_restored();
         product.output.assert_restored();
+        // SAFETY: undo the harness's flow stop after observing child cleanup.
+        checked(unsafe { libc::tcflow(product.output.slave.as_raw_fd(), libc::TCOON) });
     }
 }

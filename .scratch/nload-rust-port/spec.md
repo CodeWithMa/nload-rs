@@ -41,7 +41,7 @@ There are three invocation outcomes: Help, Version, or a validated run configura
 - Help/version terminate before clock initialization, interface discovery, terminal checks or terminal mutation. They work with redirected standard streams.
 - Help/version are standalone, not combinable with each other, an interface name or ceiling options. No short aliases are provided.
 - Unknown flags, multiple names, malformed/missing ceiling values and unsupported combinations are syntactic argument errors: stderr diagnostic, status 2, no UI and no clock/discovery/terminal work.
-- A requested name absent from a successfully discovered, nonempty startup list is a selection argument error: stderr diagnostic, status 2, no terminal mutation.
+- A requested name absent from a successfully discovered, nonempty startup list silently selects the first naturally sorted interface, exactly as if no name were supplied. It does not reserve or later auto-select that name; startup membership remains fixed.
 - Neither read nor write upstream configuration; defaults do not depend on `HOME`.
 
 Diagnostic prose and the full help wording need not be byte-identical fixtures; their required contents, destinations and statuses are contractual. Version output and expressly specified screen text are exact.
@@ -69,7 +69,7 @@ Perform startup in this order:
 
 1. Parse arguments and finish informational invocations.
 2. Initialize the BOOTTIME clock, acquire a complete initial counter snapshot and timestamp its acquisition completion.
-3. Naturally sort names; reject empty discovery and validate initial selection.
+3. Naturally sort names; reject empty discovery and select the exact requested name if present, otherwise the first entry.
 4. Validate terminal stdin/stdout and TERM before terminal mutation.
 5. Prepare signal notification and staged session ownership before mutation; enter the UI using the discovery observations as baselines.
 
@@ -280,7 +280,8 @@ Keep one owned pending output frame with resumable nonblocking partial writes. R
 | Condition | Result |
 | --- | --- |
 | Standalone help/version | stdout, status 0; no clock/discovery/terminal setup. |
-| Syntactic argument error or absent requested name in successful nonempty discovery | stderr diagnostic, status 2; no UI. |
+| Syntactic argument error | stderr diagnostic, status 2; no UI. |
+| Absent requested name in successful nonempty discovery | Continue UI with the first naturally sorted interface; no diagnostic. |
 | Empty discovery or startup acquisition failure | Distinct stderr diagnostics, status 1; no terminal mutation. |
 | Non-terminal interactive stdin/stdout or rejected TERM | stderr diagnostic, status 1; no mutation. |
 | Too-small dimensions | Continue interactive warning view; not fatal. |
@@ -367,11 +368,11 @@ Compare exact counters, states, sample counts, mandated text and rendered fixtur
 | A01 — Identity/version (§§1, 2.1, 9) | Package metadata at 0.1.0; scripted clock/discovery/terminal adapters that reject calls. | Invoke standalone `--version`, including redirected streams. | Exactly `nload-rs 0.1.0\n`, stdout/status 0; no adapter calls; executable/package identity and version authority match. | D, B |
 | A02 — Help (§2.1) | Same no-work adapters and redirected streams. | Invoke standalone `--help`. | stdout/status 0; documented invocation, flags, units/defaults/zero; no clock/discovery/terminal work. | D |
 | A03 — Grammar errors (§2.1) | No-work adapters. | Unknown option, `-h`, `-V`, two names, help+version, help/version+name or ceiling flag. | stderr/status 2; no UI or adapters; no short informational aliases. | D |
-| A04 — Positional identity (§§2.1, 3) | Startup list includes case variants, raw non-UTF-8 names and a name beginning with `-`. | Select exact name; use `--` for leading dash; try absent/case-mismatched name. | Original-byte matching; full list retained; missing selection status 2 before mutation in successful nonempty discovery. | D |
+| A04 — Positional identity (§§2.1, 3) | Startup list includes case variants, raw non-UTF-8 names and a name beginning with `-`. | Select exact name; use `--` for leading dash; try absent/case-mismatched name. | Original-byte matching; full list retained; absent/case-mismatched selection silently falls back to the default first interface in successful nonempty discovery. | D |
 | A05 — Ceiling defaults/options (§2.2) | Multi-entry startup list. | No options; options before/after name; `-i 20480 -o 5120`; repeated flags; leading zeros; `-i 0`. | Independent defaults; 2621440/655360 bytes/s override example; last wins; zero resets only its direction; same ceilings after navigation. | D |
 | A06 — Ceiling limits/errors (§2.2) | No-work adapters for invalid syntax. | Values 1, 144115188075855871, 144115188075855872, very long overflow token, empty/missing, signed, fractional, whitespace, suffix or attached form. | Valid converted ceilings 128 and 18446744073709551488; other listed invalid inputs status 2 without UI/work; no wrap/clamp. | D |
 | A07 — Configuration independence (§2.1) | Set/unset HOME; hypothetical conflicting upstream config. | Start with identical arguments/discovery. | Identical defaults/list/view; no upstream config read/write. | D, B |
-| A08 — Startup discovery outcomes (§2.3) | Empty complete snapshot, failed read/parse, or nonempty snapshot missing requested name. | Start each variant. | Empty versus enumeration-failure diagnostics/status 1; requested missing name in nonempty snapshot status 2; no terminal mutation. | D |
+| A08 — Startup discovery outcomes (§2.3) | Empty complete snapshot, failed read/parse, or nonempty snapshot missing requested name. | Start each variant. | Empty versus enumeration-failure diagnostics/status 1 before terminal mutation; requested missing name in nonempty snapshot starts the UI with default selection and no diagnostic. | D |
 | A09 — Natural order (§3.1) | Unsorted `eth10`, `eth2`, `eth02`, `eth1`, `eth3`, loopback/inactive names, case/raw-byte variants; comparator fixtures with very long digit runs. | Construct startup list under differing locale settings. | Natural order/tie-break from §3.1; no bounded-run overflow or locale dependence; all discovery entries included; default first selected. | D |
 | A10 — Startup ordering/baseline (§§2.3, 4.2) | Instrumented acquisition/clock/session calls; slow UI initialization. | Start and then process an overdue first deadline. | Parse → initial clock/snapshot/completion timestamp → list/selection → terminal validation → notifications/ownership → mutation; discovery data reused; first deadline completion+500 ms; one fresh overdue acquisition. | D |
 | A11 — Navigation (§3.2) | Three ordered entries and a one-entry variant. | All four arrows, repeated events, reverse/forward wrapping, excluded aliases. | One symmetric step per event in order; one-entry no-op; aliases ignored; prompt requested redraw with zero acquisition/sample/reset effects. | D; real input/visual evidence in T03/T14 |
@@ -453,9 +454,10 @@ Record the implementation revision, exact compiler, target/environment and depen
 | Screen | Stacked directions, Curr/Avg/Min/Max/Ttl, ASCII partial bars, no footer. | Interface rather than Device/IP header; defined geometry, visible ceilings, exact availability distinctions, safe overflow and small-terminal warning. |
 | Terminal/delivery | Interactive traffic monitoring and handled quit cleanup. | Owned direct Linux loop; xterm-compatible support declarations; alternate-screen/cursor handling; explicit signal/failure statuses and staged cleanup; distinct Rust package/version/GPL-2.0-only identity. |
 
-Two cross-ticket amendments are already incorporated, not alternatives left for implementation:
+The following amendments are incorporated:
 
 1. [Decide traffic statistics and sampling behavior](issues/04-statistics-contract.md#resolution--2026-10-01--alice) extends [Decide the minimal startup and navigation contract](issues/03-startup-navigation-contract.md#resolution--2026-10-01--alice) with ceiling options and their grammar. All other startup/navigation requirements remain.
 2. [Decide the port's architecture and test seams](issues/07-module-boundaries.md#resolution--2026-10-02--alice) amends [Validate the single-interface screen and terminal behavior](issues/05-single-interface-screen.md#resolution--2026-10-01--alice): target xterm-compatible emulator sessions, reject the specified TERM declarations, **show the cursor on cleanup rather than restore unknown prior visibility**, and apply cleanup-error/simultaneous-signal exit arbitration. Saved input mode/file flags and leaving the alternate screen remain required.
+3. The human confirmed a startup-only missing-interface fallback on 2026-10-03 for autostart scripts naming a VPN interface before it exists. This supersedes the absent-name status-2 requirement in [Decide the minimal startup and navigation contract](issues/03-startup-navigation-contract.md#resolution--2026-10-01--alice): select the normal default silently instead. Exact-name selection, fixed startup membership and genuine discovery/argument failures retain their contracts.
 
 The planning route is complete. Implementation may choose private types, file subdivision and practical test-harness mechanics within these contracts; those are implementation details rather than open product decisions.

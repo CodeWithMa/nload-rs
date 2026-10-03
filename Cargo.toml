@@ -1,6 +1,6 @@
 [package]
 name = "nload-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A Linux single-interface network traffic monitor inspired by nload"
 license = "GPL-2.0-only"

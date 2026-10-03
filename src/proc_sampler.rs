@@ -168,6 +168,7 @@ impl Snapshot {
 
     /// Compute startup membership/selection without consuming the snapshot:
     /// the same counters must supply the monitor's initial baselines.
+    /// An absent requested name selects the first entry, just like no request.
     /// Call only after successful acquisition; acquisition errors remain distinct.
     pub(crate) fn startup(
         &self,
@@ -178,13 +179,9 @@ impl Snapshot {
         }
         let mut names: Vec<_> = self.counters.keys().cloned().collect();
         names.sort_by(|left, right| natural_order(left, right));
-        let selected = match requested {
-            None => 0,
-            Some(name) => names
-                .iter()
-                .position(|entry| entry == name)
-                .ok_or(StartupError::MissingSelection)?,
-        };
+        let selected = requested
+            .and_then(|name| names.iter().position(|entry| entry == name))
+            .unwrap_or(0);
         Ok(StartupSelection { names, selected })
     }
 }
@@ -228,15 +225,12 @@ pub(crate) struct StartupSelection {
 pub(crate) enum StartupError {
     /// Application diagnostic/status 1, distinct from acquisition failure.
     EmptyDiscovery,
-    /// Successful nonempty discovery but missing exact requested bytes: status 2.
-    MissingSelection,
 }
 
 impl fmt::Display for StartupError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::EmptyDiscovery => "no interfaces discovered",
-            Self::MissingSelection => "requested interface is absent from startup discovery",
         })
     }
 }
@@ -583,21 +577,14 @@ mod tests {
             assert_eq!(selection.selected, index);
             assert!(snapshot.get(name).is_some()); // initial baselines remain available
         }
-        for missing in [b"ETH2".as_slice(), b"missing", b"e\\xFF1", b""] {
-            assert_eq!(
-                snapshot.startup(Some(missing)),
-                Err(StartupError::MissingSelection)
-            );
+        for missing in [b"ETH2".as_slice(), b"wg0", b"missing", b"e\\xFF1", b""] {
+            assert_eq!(snapshot.startup(Some(missing)).unwrap(), default);
         }
         let empty = Snapshot::parse(HEADERS).unwrap();
         assert_eq!(empty.startup(None), Err(StartupError::EmptyDiscovery));
         assert_eq!(
             empty.startup(Some(b"missing")),
             Err(StartupError::EmptyDiscovery)
-        );
-        assert_ne!(
-            StartupError::EmptyDiscovery.to_string(),
-            StartupError::MissingSelection.to_string()
         );
     }
 

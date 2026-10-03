@@ -9,7 +9,7 @@ use std::io::{self, Write};
 
 use crate::arguments::{self, Invocation, RunConfig};
 use crate::monitor::Monitor;
-use crate::proc_sampler::{CounterSource, ProcSampler, StartupError, counter_outcome};
+use crate::proc_sampler::{CounterSource, ProcSampler, counter_outcome};
 use crate::screen;
 use crate::terminal::{
     Clock, Event, ExitReport, Failure, LinuxClock, LinuxTerminal, Ready, Runtime, RuntimeEffects,
@@ -100,13 +100,9 @@ fn interactive<C: CounterSource, K: Clock, O: SessionOps>(
             .acquire()
             .map_err(|error| Failure::from(format!("interface enumeration: {error}")))?;
         let completed = clock.now()?;
-        let startup =
-            snapshot
-                .startup(config.interface.as_deref())
-                .map_err(|error| match error {
-                    StartupError::MissingSelection => Failure::argument(error.to_string()),
-                    StartupError::EmptyDiscovery => Failure::from(error.to_string()),
-                })?;
+        let startup = snapshot
+            .startup(config.interface.as_deref())
+            .map_err(|error| Failure::from(error.to_string()))?;
         let deadline = completed
             .checked_add(SAMPLE_NS)
             .ok_or_else(|| io::Error::other("sample deadline overflow"))?;

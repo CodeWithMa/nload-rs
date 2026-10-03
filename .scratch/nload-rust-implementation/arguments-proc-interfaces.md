@@ -93,10 +93,10 @@ activity/address filter participates.
 
 - `StartupError::EmptyDiscovery`: distinct diagnostic/status 1, taking precedence
   over a requested name when discovery is empty.
-- `StartupError::MissingSelection`: exact bytes are absent from successful
-  nonempty discovery; diagnostic/status 2.
+- If exact requested bytes are absent from successful nonempty discovery, select
+  the first naturally sorted entry silently, just as with no requested name.
 - Initial acquisition errors remain enumeration failure/status 1, never an empty
-  list or selection failure. All three finish before terminal mutation.
+  list. Discovery failures finish before terminal mutation.
 
 Startup sorting borrows the snapshot, preserving the same paired counters for
 monitor baselines. The application initializes BOOTTIME, acquires once, timestamps

@@ -268,29 +268,15 @@ pub(crate) struct ExitReport {
     pub(crate) diagnostics: Vec<String>,
 }
 
-/// Startup selection errors need status 2 inside the same caught-panic boundary
-/// as discovery. All I/O/runtime failures use status 1.
+/// Startup and runtime failures inside the caught-panic boundary use status 1.
 #[derive(Debug)]
 pub(crate) struct Failure {
-    status: u8,
     diagnostic: String,
-}
-
-impl Failure {
-    pub(crate) fn argument(diagnostic: String) -> Self {
-        Self {
-            status: 2,
-            diagnostic,
-        }
-    }
 }
 
 impl From<String> for Failure {
     fn from(diagnostic: String) -> Self {
-        Self {
-            status: 1,
-            diagnostic,
-        }
+        Self { diagnostic }
     }
 }
 
@@ -313,7 +299,7 @@ pub(crate) fn guarded<O: SessionOps>(
     drop(hook);
     let (mut status, mut diagnostics) = match result {
         Ok(Ok(shutdown)) => (shutdown.status(), Vec::new()),
-        Ok(Err(error)) => (error.status, vec![error.diagnostic]),
+        Ok(Err(error)) => (1, vec![error.diagnostic]),
         Err(payload) => {
             let message = if let Some(message) = payload.downcast_ref::<String>() {
                 message.clone()

@@ -33,7 +33,10 @@ cargo build --release --locked
 Interactive runs require terminal stdin/stdout and an xterm-compatible `TERM`
 declaration. Use arrows to navigate, q/Q to quit, or Ctrl+C to exit with status
 130. An optional interface name selects the initial view without filtering the
-list. Independent `-i VALUE`/`-o VALUE` graph ceilings use integer binary-scaled
+list. If that name is absent at startup (for example, `wg0` before the VPN starts),
+the first naturally sorted interface is selected silently, just as when no name
+is supplied. Interfaces that appear later are available after restarting.
+Independent `-i VALUE`/`-o VALUE` graph ceilings use integer binary-scaled
 kBit/s; each defaults to 10240, and zero restores that direction's default.
 
 ```sh

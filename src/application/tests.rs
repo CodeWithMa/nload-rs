@@ -403,13 +403,9 @@ fn informational_and_syntax_paths_have_correct_streams_status_and_zero_effects()
 
 #[test]
 fn startup_errors_stop_before_terminal_validation_and_remain_distinct() {
-    for variant in 0..6 {
+    for variant in 1..6 {
         let mut h = Harness::new(&[(b"eth0", 10)], vec![]);
-        let tokens = if variant == 0 {
-            args(&["ETH0"])
-        } else {
-            vec![]
-        };
+        let tokens = args(&["wg0"]);
         match variant {
             1 => h.counters.rounds = VecDeque::from([Ok(snapshot(&[]))]),
             2 => {
@@ -429,18 +425,17 @@ fn startup_errors_stop_before_terminal_validation_and_remain_distinct() {
             }
             _ => {}
         }
-        assert_eq!(h.run(&tokens), if variant == 0 { 2 } else { 1 });
+        assert_eq!(h.run(&tokens), 1);
         assert!(h.stdout.is_empty());
         let error = String::from_utf8(h.stderr).unwrap();
         assert!(error.contains(
             [
-                "requested interface",
                 "no interfaces",
                 "enumeration",
                 "enumeration",
                 "clock init",
                 "completion clock"
-            ][variant]
+            ][variant - 1]
         ));
         assert!(h.session.state.borrow().calls.is_empty());
     }
@@ -448,58 +443,60 @@ fn startup_errors_stop_before_terminal_validation_and_remain_distinct() {
 
 #[test]
 fn startup_reuses_discovery_and_orders_clock_before_terminal_mutation() {
-    let mut h = Harness::new(
-        &[(b"eth10", 100), (b"eth2", 20), (b"eth02", 2)],
-        vec![Tick::input(10, b"q")],
-    );
-    h.counters.durations.push_back(7);
-    assert_eq!(h.plain(), 0);
-    assert_eq!(
-        &h.clock.log.borrow()[..4],
-        ["clock-init", "clock-now", "acquire", "clock-now"]
-    );
-    assert_eq!(
-        &h.session.state.borrow().calls[..9],
-        [
-            "support",
-            "snapshot",
-            "prepare",
-            "raw",
-            "input",
-            "output",
-            "dimensions",
-            "enter",
-            "hide"
-        ]
-    );
-    assert_eq!(h.counters.calls, 1);
-    assert_eq!(
-        &h.clock.log.borrow()[..13],
-        [
-            "clock-init",
-            "clock-now",
-            "acquire",
-            "clock-now",
-            "support",
-            "snapshot",
-            "prepare",
-            "raw",
-            "input",
-            "output",
-            "dimensions",
-            "enter",
-            "hide"
-        ]
-    );
-    let view = h.view.as_ref().unwrap();
-    assert_eq!(view.name, b"eth02");
-    assert_eq!(view.count, 3);
-    assert_eq!(view.state, ViewState::Baseline);
-    assert_eq!(view.total, Some(2));
-    assert!(view.samples.is_empty());
-    assert_eq!(h.waits()[0].0, 7 + SAMPLE_NS);
-    h.restored();
-    assert!(h.stderr.is_empty());
+    for tokens in [vec![], args(&["wg0"]), args(&["ETH02"])] {
+        let mut h = Harness::new(
+            &[(b"eth10", 100), (b"eth2", 20), (b"eth02", 2)],
+            vec![Tick::input(10, b"q")],
+        );
+        h.counters.durations.push_back(7);
+        assert_eq!(h.run(&tokens), 0);
+        assert_eq!(
+            &h.clock.log.borrow()[..4],
+            ["clock-init", "clock-now", "acquire", "clock-now"]
+        );
+        assert_eq!(
+            &h.session.state.borrow().calls[..9],
+            [
+                "support",
+                "snapshot",
+                "prepare",
+                "raw",
+                "input",
+                "output",
+                "dimensions",
+                "enter",
+                "hide"
+            ]
+        );
+        assert_eq!(h.counters.calls, 1);
+        assert_eq!(
+            &h.clock.log.borrow()[..13],
+            [
+                "clock-init",
+                "clock-now",
+                "acquire",
+                "clock-now",
+                "support",
+                "snapshot",
+                "prepare",
+                "raw",
+                "input",
+                "output",
+                "dimensions",
+                "enter",
+                "hide"
+            ]
+        );
+        let view = h.view.as_ref().unwrap();
+        assert_eq!(view.name, b"eth02");
+        assert_eq!(view.count, 3);
+        assert_eq!(view.state, ViewState::Baseline);
+        assert_eq!(view.total, Some(2));
+        assert!(view.samples.is_empty());
+        assert_eq!(h.waits()[0].0, 7 + SAMPLE_NS);
+        h.restored();
+        assert!(h.stderr.is_empty());
+    }
 }
 
 #[test]

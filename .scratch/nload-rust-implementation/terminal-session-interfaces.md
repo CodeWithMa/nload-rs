@@ -50,7 +50,7 @@ Initialize the session only after successful nonempty discovery/selection:
 let mut session = terminal::Session::new(terminal::LinuxTerminal::new());
 let report = terminal::guarded(&mut session, |session| {
     // Initialize BOOTTIME, acquire/timestamp discovery and select startup list.
-    // Map a missing requested name to Failure::argument; other failures to 1.
+    // An absent requested name uses default selection; startup failures use 1.
     let (width, height) = session.initialize()?;
     // Construct/use the monitor with the discovery baselines, then run the loop.
     // Runtime returns Quit/Interrupt/Terminate; fatal effects return Failure.

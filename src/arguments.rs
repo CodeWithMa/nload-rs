@@ -142,6 +142,7 @@ pub(crate) fn help_text() -> String {
          \x20      {name} --version\n\n\
          Monitor one interface; arrows navigate the complete startup list.\n\
          INTERFACE selects an exact, case-sensitive name; -- ends option parsing.\n\
+         If the requested name is not found, use the first naturally sorted interface.\n\
          -i VALUE  Incoming graph ceiling\n\
          -o VALUE  Outgoing graph ceiling\n\
          VALUE is ASCII decimal binary-scaled kBit/s (1 kBit/s = 1024 Bit/s\n\

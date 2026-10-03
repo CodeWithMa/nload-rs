@@ -547,18 +547,15 @@ fn drop_during_unwinding_survives_an_additional_restoration_panic() {
 }
 
 #[test]
-fn pre_session_startup_errors_keep_argument_and_failure_statuses_without_effects() {
+fn pre_session_startup_errors_keep_failure_status_without_effects() {
     let _lock = HOOK_LOCK.lock().unwrap();
-    for (failure, expected_status) in [
-        (
-            Failure::argument("requested interface is absent".to_owned()),
-            2,
-        ),
-        (Failure::from("enumeration failed".to_owned()), 1),
+    for failure in [
+        Failure::from("enumeration failed".to_owned()),
+        Failure::from(io::Error::other("clock init failed")),
     ] {
         let (mut session, state) = Script::new();
         let report = guarded(&mut session, |_| Err(failure));
-        assert_eq!(report.status, expected_status);
+        assert_eq!(report.status, 1);
         assert_eq!(report.diagnostics.len(), 1);
         assert!(state.borrow().log.is_empty());
         assert_restored(&state);

@@ -1,11 +1,11 @@
 # Establish Braille and color terminal feasibility
 
-Status: open
+Status: closed
 Labels: wayfinder:research
 Type: research
 Mode: AFK
 Parent: [Find the way to a btop-style graph spec for nload-rs](../map.md)
-Assignee: alice (research agent: terminal color)
+Assignee: alice (OpenCode session: work map)
 Blocked by:
 
 ## Question
@@ -17,3 +17,5 @@ The answer supplies evidence for the seam decision; it does not choose fallback 
 ## Comments
 
 - 2026-10-07 alice (research agent: terminal color): findings linked, ticket left open. Asset: `.scratch/btop-graph-spec/research/terminal-color-feasibility.md` (sha256 `f9f64eb4…5fe375`, mirrored identically). Context: throwaway branch `research/terminal-color` (base `4d4e8ac` on `dev`, uncommitted by design) with isolated worktree `/tmp/opencode/nload-rs-research-terminal-color` holding the mirrored asset. Gist: feasible with zero new deps — Braille is 3 bytes/1 cell (U+2800–U+28FF, RFC 3629 + UAX #11), gradient ramp is hardcoded SGR `38;5` codes `46→…→226→…→196` (ECMA-48 + local terminfo `colors#256`), but the `String::len()`-bytes bounded-rows contract in `src/screen.rs` + `queue_frame` validation must become cell-aware with zero-width escapes and per-row SGR reset; NO_COLOR is currently ignored and non-UTF-8/under-declared-TERM behavior is policy for the seam ticket, not a technical blocker. No application code written.
+
+- Resolution — 2026-10-07 — alice (OpenCode session: work map): resolved as research (AFK). Evidence accepted: feasible with zero new deps (Braille 3 bytes/1 cell, `38;5` ramp `46→…→226→…→196`, hardcode SGR matching existing session literals); seam must move to display-cell width with zero-width escapes, escape-safe trim/split, per-row reset; `dumb`/`linux` already rejected, NO_COLOR/non-UTF-8/under-declared-TERM are policy for the seam ticket. Asset: [terminal color + Braille feasibility](../research/terminal-color-feasibility.md). No application code written.

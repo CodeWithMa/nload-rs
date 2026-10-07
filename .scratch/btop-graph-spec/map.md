@@ -21,6 +21,9 @@ An implementation-ready spec for replacing the ASCII `. | #` graph bars with bto
 
 <!-- Named links to closed decision tickets only. Charting scope is recorded in Notes. -->
 
+- [Establish what btop actually renders](issues/01-btop-rendering-facts.md): pinned v1.4.7 is 2-samples-per-cell Braille with positional per-row gradient and per-direction net hues, not per-value green→yellow→red.
+- [Establish Braille and color terminal feasibility](issues/02-terminal-color-feasibility.md): feasible with zero new deps; Braille 3 bytes/1 cell + `38;5` ramp, seam must go cell-aware with per-row SGR reset.
+
 ## Not yet specified
 
 <!-- In-scope fog: too coarse to ticket yet; graduates as the frontier advances. -->

@@ -1,11 +1,11 @@
 # Establish what btop actually renders
 
-Status: open
+Status: closed
 Labels: wayfinder:research
 Type: research
 Mode: AFK
 Parent: [Find the way to a btop-style graph spec for nload-rs](../map.md)
-Assignee: alice (research agent: btop rendering)
+Assignee: alice (OpenCode session: work map)
 Blocked by:
 
 ## Question
@@ -26,3 +26,7 @@ byte-identical asset mirror (sha256
 `2513d73061bd5ef089a3ef9c56afe50b248849a64849a434f6dcc800d421d20f`).
 Status stays open for the charting session's resolution indexing; no
 application code written.
+
+### Resolution — 2026-10-07 — alice (OpenCode session: work map)
+
+Resolved as research (AFK). Evidence accepted: pinned btop v1.4.7 uses 2-samples-per-cell Braille (`braille_up`/`braille_down` 25-entry tables), positional per-row gradient (per-column only for height==1), per-direction indigo/magenta hues for net (green→yellow→red is CPU-box convention), `no_zero` bottom-row minimum dots vs current blank zero column, autoscale-with-hysteresis vs fixed ceiling, 2× horizontal / ~4× vertical density over same cell grid. No nload-rs mapping chosen; handoff questions recorded in asset §6. Asset: [btop rendering facts](../research/btop-rendering.md). No application code written.

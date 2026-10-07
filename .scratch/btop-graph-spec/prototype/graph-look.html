@@ -1,0 +1,323 @@
+<!-- PROTOTYPE, wipe me — throwaway visual for wayfinder ticket 03-graph-prototype.md, not application code. -->
+<!-- Three variants of the nload-rs graph look, switchable via ?variant=, on a single file. -->
+<!-- Question: what should replacement Braille+gradient graphs look like vs current ASCII? -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PROTOTYPE: nload-rs Braille graph look (A/B/C)</title>
+<style>
+  body { background:#0b0e14; color:#c9d1d9; font-family: ui-monospace, Menlo, Consolas, monospace; margin:0; padding:16px 16px 80px; }
+  h1 { font-size:16px; margin:0 0 4px; } h1 .tag { background:#ff0; color:#000; padding:0 6px; border-radius:3px; font-size:12px; }
+  p.sub { color:#8b949e; font-size:12px; margin:0 0 12px; max-width:90ch; }
+  .controls { display:flex; gap:16px; flex-wrap:wrap; margin:12px 0; font-size:12px; }
+  .controls fieldset { border:1px solid #30363d; border-radius:6px; padding:8px 10px; }
+  .controls legend { color:#8b949e; padding:0 4px; }
+  .controls label { margin-right:10px; cursor:pointer; }
+  .term { background:#000; border:1px solid #30363d; border-radius:8px; padding:12px; display:inline-block; line-height:1.25; }
+  .term pre { margin:0; font-size:14px; }
+  .row-label { color:#8b949e; }
+  .stat { color:#c9d1d9; }
+  .legend { font-size:12px; color:#8b949e; margin-top:10px; max-width:100ch; }
+  .legend code { color:#ffa657; }
+  #switcher { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); background:#161b22; border:1px solid #58a6ff;
+    border-radius:999px; padding:8px 12px; display:flex; gap:12px; align-items:center; font-size:13px; box-shadow:0 4px 24px #000; }
+  #switcher button { background:#21262d; color:#fff; border:1px solid #30363d; border-radius:6px; padding:4px 10px; cursor:pointer; }
+  #switcher button.active { border-color:#58a6ff; background:#1f6feb; }
+  #state { font-size:12px; color:#8b949e; margin-top:8px; }
+  a { color:#58a6ff; }
+</style>
+</head>
+<body>
+<h1><span class="tag">PROTOTYPE</span> nload-rs graph look — <span id="title-variant">?</span></h1>
+<p class="sub">
+  Throwaway mockup for <a href="../issues/03-graph-prototype.md">Prototype the Braille and color graph look</a>.
+  Three forms side-by-side via <code>?variant=A|B|C</code>:
+  <b>A</b> current ASCII <code>. | #</code> (0.30/0.70/1.0 thresholds) ·
+  <b>B</b> same-geometry Braille + value gradient (1 sample/cell) ·
+  <b>C</b> higher-res 2-sample/cell Braille + value gradient (btop-faithful).
+  Sources: <a href="../research/btop-rendering.md">btop rendering facts</a>,
+  <a href="../research/terminal-color-feasibility.md">terminal feasibility</a>.
+  Not application code. No persistence. Open via <code>python3 -m http.server</code> or double-click.
+</p>
+
+<div class="controls">
+  <fieldset><legend>Scenario (incoming / outgoing)</legend>
+    <label><input type="radio" name="sc" value="ramp-sat" checked> ramp / saturated</label>
+    <label><input type="radio" name="sc" value="idle"> measured idle zeros</label>
+    <label><input type="radio" name="sc" value="baseline"> baseline (no rate yet)</label>
+    <label><input type="radio" name="sc" value="absent"> unavailable (absent)</label>
+  </fieldset>
+  <fieldset><legend>Geometry</legend>
+    <label><input type="radio" name="geo" value="80x24" checked> 80×24</label>
+    <label><input type="radio" name="geo" value="60x16"> 60×16 (minimum)</label>
+    <label><input type="radio" name="geo" value="50x12"> 50×12 (too small)</label>
+  </fieldset>
+</div>
+
+<div class="term"><pre id="screen"></pre></div>
+<div id="state"></div>
+<div class="legend" id="legend"></div>
+
+<div id="switcher">
+  <button id="prev" title="←">←</button>
+  <span id="cur">?</span>
+  <button id="next" title="→">→</button>
+  <span style="color:#8b949e">A=ASCII · B=Braille 1/cell · C=Braille 2/cell</span>
+</div>
+
+<script>
+// btop v1.4.7 braille_up (bottom-anchored), from research/btop-rendering.md §1
+const BRAILLE_UP = [" ","⢀","⢠","⢰","⢸","⡀","⣀","⣠","⣰","⣸","⡄","⣄","⣤","⣴","⣼","⡆","⣆","⣦","⣶","⣾","⡇","⣇","⣧","⣷","⣿"];
+// 256-color ramp green→yellow→red (feasibility §2), SGR 38;5 codes
+const RAMP = [46,82,118,154,190,226,220,214,208,202,196];
+const RAMP_HEX = {46:"#00ff00",82:"#5fff00",118:"#87ff00",154:"#afff00",190:"#d7ff00",226:"#ffff00",220:"#ffd700",214:"#ffaf00",208:"#ff8700",202:"#ff5f00",196:"#ff0000"};
+
+function params() {
+  const q = new URLSearchParams(location.search);
+  return { variant: (q.get("variant")||"A").toUpperCase(), sc: document.querySelector('input[name=sc]:checked').value, geo: document.querySelector('input[name=geo]:checked').value };
+}
+function setVariant(v) {
+  const q = new URLSearchParams(location.search);
+  q.set("variant", v); location.search = q.toString();
+}
+
+// scenario sample arrays as rate/ceiling ratios (1.0 = ceiling, >1 saturates)
+function scenarioSamples(sc, widthCells, twoPerCell) {
+  const n1 = widthCells; // A/B: 1 sample per cell
+  const n2 = widthCells*2; // C: 2 samples per cell
+  function ramp(n, lo, hi) { const a=[]; for(let i=0;i<n;i++) a.push(lo+(hi-lo)*i/(n-1)); return a; }
+  function fill(n,v) { return new Array(n).fill(v); }
+  switch(sc) {
+    case "ramp-sat": return { inc: twoPerCell? ramp(n2,0,1.2): ramp(n1,0,1.2), out: twoPerCell? fill(n2,1.6): fill(n1,1.6),
+      status:null, note:"incoming ramp 0→120% ceiling (shows 0.30/0.70 thresholds + saturation); outgoing 160% (fully saturated, numbers uncapped)" };
+    case "idle": return { inc: twoPerCell? fill(n2,0): fill(n1,0), out: twoPerCell? fill(n2,0): fill(n1,0),
+      status:null, note:"measured idle zeros: ASCII blank column vs Braille no_zero minimum dots on bottom row (btop §4)" };
+    case "baseline": return { inc:[], out:[], status:"Waiting for rate sample", note:"baseline: first observation, totals shown, no rates/graph (empty history)" };
+    case "absent": return { inc:[], out:[], status:"Unavailable: interface absent", note:"unavailable: totals --, graphs empty" };
+  }
+}
+
+// ASCII cell (screen.rs thresholds)
+function asciiCell(filled, level) {
+  if (filled >= level+1.0) return "#";
+  if (filled >= level+0.70) return "|";
+  if (filled >= level+0.30) return ".";
+  return " ";
+}
+// btop-style per-row quantization 0..4 (research §2), mod 0.1, no_zero bottom minimum
+function brailleLevel(value100, horizon, H, isBottomRow, measured) {
+  const curHigh = Math.round(100*(H-horizon)/H), curLow = Math.round(100*(H-(horizon+1))/H);
+  let clampMin = (isBottomRow && measured) ? 1 : 0; // no_zero=true for net graphs
+  if (value100 >= curHigh) return 4;
+  if (value100 <= curLow) return clampMin;
+  let v = Math.round((value100-curLow)*4/(curHigh-curLow)+0.1);
+  return Math.max(clampMin, Math.min(4, v));
+}
+function rowColor(H, horizon) {
+  const bottomPos = (H-1-horizon);
+  const idx = H<=1 ? 10 : Math.round(bottomPos/(H-1)*(RAMP.length-1));
+  return { code: RAMP[idx], hex: RAMP_HEX[RAMP[idx]] };
+}
+
+function render() {
+  const { variant, sc, geo } = params();
+  const [W,H] = geo.split("x").map(Number);
+  document.getElementById("title-variant").textContent =
+    variant==="A" ? "A — current ASCII" : variant==="B" ? "B — Braille same-geometry + gradient" : "C — Braille 2-sample/cell + gradient";
+  document.getElementById("cur").textContent = variant+" ("+geo+" · "+sc+")";
+  document.querySelectorAll("#switcher button").forEach(()=>{});
+  [...document.querySelectorAll("#switcher button")].forEach(b=>b.classList.remove("active"));
+
+  const el = document.getElementById("screen");
+  const legend = document.getElementById("legend");
+  const state = document.getElementById("state");
+
+  if (W < 60 || H < 16) {
+    el.innerHTML = `<span class="row-label">Terminal too small (need 60x16)</span>\n<span>Interface eth0 (1/1)</span>\n<span>${sc==="baseline"?"Waiting for rate sample":sc==="absent"?"Unavailable: interface absent":"Measured"}</span>` +
+      `\n<span class="row-label">`+` `.repeat(0)+`geometry ${W}×${H}: text-only warning path, no Braille/color handling (feasibility §7)</span>`;
+    legend.innerHTML = `Too-small path is text-only. <code>bounded()</code> assertions are the only touchpoint. No graph to judge here — flip geometry back to 80×24 or 60×16.`;
+    state.textContent = `variant=${variant} scenario=${sc} geometry=${geo} → warning path`;
+    return;
+  }
+
+  const STAT_W = 28, GAP = 2;
+  const gw = W - STAT_W - GAP; // graph cells
+  const incH = Math.floor((H-4)/2), outLabel = 3+incH;
+  const graphH_inc = (outLabel-1)-3, graphH_out = (H-1)-(outLabel+1);
+  // for prototype show same H for both (10 at 80x24, 6 at 60x16)
+
+  const twoPerCell = (variant==="C");
+  const s = scenarioSamples(sc, gw, twoPerCell);
+  // fit: newest fitting suffix (screen.rs), leading blank pad
+  function fit(samples, cells) {
+    if (variant==="C") { // cells hold 2 samples each
+      const need = cells*2;
+      const tail = samples.slice(Math.max(0,samples.length-need));
+      const padSamples = need - tail.length;
+      return { tail, padCells: Math.floor(padSamples/2), oddPad: padSamples%2 };
+    }
+    const tail = samples.slice(Math.max(0,samples.length-cells));
+    return { tail, padCells: cells-tail.length, oddPad: 0 };
+  }
+
+  function graphRows(samples, gH, label) {
+    const rows = [];
+    if (samples.length===0) { for(let r=0;r<gH;r++) rows.push({cells:new Array(gw).fill(" "), colors:new Array(gw).fill(null)}); return rows; }
+    if (variant==="A") {
+      const { tail, padCells } = fit(samples, gw);
+      for(let horizon=0; horizon<gH; horizon++) {
+        const level = gH-1-horizon;
+        const cells = [];
+        for(let c=0;c<padCells;c++) cells.push(" ");
+        const offset = gw - tail.length;
+        for(let i=0;i<tail.length;i++) {
+          const filled = tail[i]>=1 ? gH : gH*tail[i];
+          cells.push(asciiCell(filled, level));
+        }
+        rows.push({cells, colors:cells.map(()=>null)});
+      }
+    } else {
+      // B/C Braille with positional gradient
+      const values100 = samples.map(v=>Math.max(0,Math.min(100, v*100)));
+      if (variant==="B") {
+        const { tail, padCells } = fit(values100, gw);
+        for(let horizon=0; horizon<gH; horizon++) {
+          const cells=[], colors=[];
+          const col = rowColor(gH, horizon);
+          for(let c=0;c<padCells;c++){cells.push(" ");colors.push(null);}
+          for(let i=0;i<tail.length;i++){
+            const lv = brailleLevel(tail[i], horizon, gH, horizon===gH-1, true);
+            cells.push(BRAILLE_UP[lv*5+lv]); colors.push(col);
+          }
+          rows.push({cells, colors});
+        }
+      } else {
+        const { tail, padCells } = fit(values100, gw); // tail in samples (2 per cell)
+        // padCells in sample-halves → convert to cell pad
+        const padCellsC = Math.floor((padCells)/1); // fit() already returns cell pad for C? recompute:
+        const cellsTotal = gw;
+        const nCells = Math.ceil(tail.length/2);
+        const lead = cellsTotal - nCells;
+        for(let horizon=0; horizon<gH; horizon++) {
+          const cells=[], colors=[];
+          const col = rowColor(gH, horizon);
+          for(let c=0;c<lead;c++){cells.push(" ");colors.push(null);}
+          for(let ci=0; ci<nCells; ci++) {
+            const lv0 = brailleLevel(tail[ci*2]??tail[tail.length-1], horizon, gH, horizon===gH-1, true);
+            const lv1 = brailleLevel(tail[ci*2+1]??tail[tail.length-1], horizon, gH, horizon===gH-1, true);
+            cells.push(BRAILLE_UP[lv0*5+lv1]); colors.push(col);
+          }
+          rows.push({cells, colors});
+        }
+      }
+    }
+    return rows;
+  }
+
+  // build full screen lines as HTML
+  let html = "";
+  function escRow(cells, colors, suffix) {
+    // suffix = "  Curr: ..." stats text (uncolored, shows per-row SGR reset invariant)
+    let s = "";
+    let open = null;
+    for(let i=0;i<cells.length;i++){
+      const c = colors[i];
+      const code = c? c.code : null;
+      if (code !== open) {
+        if (open!==null) s += "</span>";
+        if (code!==null) s += `<span style="color:${c.hex}">`;
+        open = code;
+      }
+      s += cells[i]===" " ? " " : cells[i];
+    }
+    if (open!==null) s += "</span>";
+    // SGR reset happens here in real emission (per-row ESC[0m) before stats text
+    if (suffix) s += "  " + `<span class="stat">${suffix}</span>`;
+    return s;
+  }
+
+  const statusLine = s.status ? s.status : "=".repeat(W);
+  html += `Interface eth0 (1/1)\n${s.status? s.status : "=".repeat(W)}\n`;
+  const statsInc = s.status? ["Curr: --","Avg: --","Min: --","Max: --","Ttl: 1.00 kByte"] : ["Curr: 1.00 kBit/s","Avg: 2.00 kBit/s","Min: 0.00 Bit/s","Max: 4.00 kBit/s","Ttl: 1.00 kByte"];
+  const statsOut = s.status? ["Curr: --","Avg: --","Min: --","Max: --","Ttl: 2.00 kByte"] : ["Curr: 1.60 kBit/s","Avg: 2.40 kBit/s","Min: 0.10 Bit/s","Max: 9.99 kBit/s","Ttl: 2.00 kByte"];
+
+  const incRows = graphRows(s.inc, graphH_inc);
+  const outRows = graphRows(s.out, graphH_out);
+  html += `Incoming: (ceiling 10.00 MBit/s)\n`;
+  // plain-text build then colorize: easier to build HTML directly
+  let lines = [];
+  lines.push("Interface eth0 (1/1)");
+  lines.push(s.status ? s.status : "=".repeat(W));
+  lines.push("Incoming: (ceiling 10.00 MBit/s)");
+  // We'll construct HTML line by line
+  let out = "";
+  out += "Interface eth0 (1/1)\n";
+  out += (s.status? s.status : "=".repeat(W)) + "\n";
+  out += "Incoming: (ceiling 10.00 MBit/s)\n";
+  let htmlLines = [];
+  htmlLines.push(`Interface eth0 (1/1)`);
+  htmlLines.push(s.status? `${s.status}` : `=`.repeat(W));
+  htmlLines.push(`Incoming: (ceiling 10.00 MBit/s)`);
+
+  function pushGraph(rows, stats) {
+    for(let r=0;r<rows.length;r++){
+      const isStatRow = r >= rows.length-5;
+      const suffix = isStatRow? stats[r-(rows.length-5)] : "";
+      const gap = "  ";
+      // cells + gap + suffix padded to W display cells
+      const cellStr = escRow(rows[r].cells, rows[r].colors, null);
+      const plainLen = gw + GAP + suffix.length; // display cells
+      const pad = " ".repeat(Math.max(0, W-plainLen));
+      htmlLines.push(`${cellStr}${gap.replace(/ /g," ")}${suffix?`<span class="stat">${suffix}</span>`:""}${pad}${r===rows.length-1?"":""}`);
+      // Note: escRow already handles color spans; gap is spaces
+    }
+  }
+  // Rebuild with correct gap handling: cells (gw) + 2 spaces + stats
+  htmlLines = [`Interface eth0 (1/1)`, s.status? s.status : "=".repeat(W), `Incoming: (ceiling 10.00 MBit/s)`];
+  for(let r=0;r<incRows.length;r++){
+    const isStat = r>=incRows.length-5;
+    const suf = isStat? statsInc[r-(incRows.length-5)] : "";
+    const left = escRow(incRows[r].cells, incRows[r].colors, null);
+    htmlLines.push(`${left}  ${suf?`<span class="stat">${suf}</span>`:""}${" ".repeat(Math.max(0, W-gw-2-suf.length))}`);
+  }
+  htmlLines.push(`Outgoing: (ceiling 10.00 MBit/s)`);
+  for(let r=0;r<outRows.length;r++){
+    const isStat = r>=outRows.length-5;
+    const suf = isStat? statsOut[r-(outRows.length-5)] : "";
+    const left = escRow(outRows[r].cells, outRows[r].colors, null);
+    htmlLines.push(`${left}  ${suf?`<span class="stat">${suf}</span>`:""}${" ".repeat(Math.max(0, W-gw-2-suf.length))}`);
+  }
+
+  el.innerHTML = htmlLines.join("\n");
+
+  const bytesNote = variant==="A"
+    ? `ASCII: 1 byte/cell, ${gw} bytes/row, no escapes. Thresholds 0.30/0.70/1.0 per cell.`
+    : `Braille: 3 bytes/cell → ${gw*3} bytes/row + per-row SGR <code>ESC[38;5;Nm</code> (10B) + <code>ESC[0m</code> (4B) with per-row reset before stats text. Display width still ${gw} cells.`;
+  legend.innerHTML =
+    `<b>Scenario:</b> ${s.note}. <b>Status:</b> ${s.status||"Measured (separator = row)"}.<br>`+
+    `<b>Geometry ${W}×${H}:</b> graph ${gw} cells × ${graphH_inc}/${graphH_out} rows (incoming/outgoing). `+
+    (twoPerCell? `Variant C packs <b>2 samples/cell</b> → up to ${gw*2} samples visible (2× history, time-per-column halves). ` : variant==="B"? `Variant B holds <b>1 sample/cell</b> → up to ${gw} samples (same history as ASCII, resolution win only vertical ~4×). ` : `Variant A holds 1 sample/column, 4 states/cell. `)+
+    bytesNote + `<br>`+
+    `<b>Color (positional, CPU-style):</b> bottom row <code>38;5;46</code> <span style="color:#00ff00">■</span> → … <code>226</code> yellow mid → top <code>38;5;196</code> <span style="color:#ff0000">■</span>. Same color across whole row (btop §3); single-row graphs would be per-column by value (not shown). `+
+    `btop-net uses per-direction indigo/magenta — this prototype shows the standing <b>value-gradient</b> preference; react to whether that reads as “hot = fast”.<br>`+
+    `<b>Zero rule:</b> idle zeros render blank in A, minimal <code>⣀</code> bottom-row dots in B/C (btop <code>no_zero</code>). React: do you want the faint baseline or true blank?<br>`+
+    `<b>What to react to:</b> dot density (B vs C), gradient steps (${RAMP.length} SGR steps — too banded / too smooth?), readability at ${W}×${H} vs 60×16 minimum, saturation wall vs ramp, stats-text legibility against color. Exact thresholds/palette/seam belong to the contract ticket.`;
+  const sgrExample = variant==="A" ? "no SGR" : `row SGR e.g. ESC[38;5;${rowColor(graphH_inc,0).code}m … ESC[0m (top) → ESC[38;5;46m … ESC[0m (bottom)`;
+  state.textContent = `variant=${variant} scenario=${sc} geometry=${geo} graph=${gw}x${graphH_inc}/${graphH_out} samples=${s.inc.length}/${s.out.length} ${sgrExample} · font needs U+2800–U+28FF, TERM 256-color assumed, no fallback`;
+}
+
+document.querySelectorAll('input[name=sc],input[name=geo]').forEach(i=>i.addEventListener("change", render));
+const order = ["A","B","C"];
+function curV(){ return (new URLSearchParams(location.search).get("variant")||"A").toUpperCase(); }
+document.getElementById("prev").onclick = ()=>{ const i=(order.indexOf(curV())+2)%3; setVariant(order[i]); };
+document.getElementById("next").onclick = ()=>{ const i=(order.indexOf(curV())+1)%3; setVariant(order[i]); };
+document.addEventListener("keydown", e=>{
+  if (/INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  if (e.key==="ArrowLeft") document.getElementById("prev").click();
+  if (e.key==="ArrowRight") document.getElementById("next").click();
+});
+render();
+</script>
+</body>
+</html>

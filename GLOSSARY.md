@@ -26,10 +26,16 @@ _Avoid_: Since-boot total, session total.
 The traffic rate represented by a full-height graph; higher rates saturate the graph without capping the numeric rate.
 
 **Graph sample**:
-A current-rate measurement represented by one column in an incoming or outgoing traffic graph.
+A current-rate measurement represented at one horizontal position in an incoming or outgoing traffic graph. Adjacent graph samples may share one displayed symbol.
 
 **Graph history**:
 The retained sequence of graph samples for an interface.
+
+**Graph glyph**:
+A displayed symbol representing adjacent graph samples within one row of a traffic graph.
+
+**Color grade**:
+A shade within an incoming or outgoing graph's color family, selected by vertical position in the graph.
 
 **Traffic observation**:
 A reading of an interface's incoming and outgoing cumulative byte counts at an observation time.

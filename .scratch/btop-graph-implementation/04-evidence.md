@@ -9,10 +9,18 @@ of the styled implementation have been supplied. T14 and the emulator aspects of
 V05 remain pending; D04 has agent live-counter/protocol evidence and a runnable
 emulator procedure, but its ordinary-emulator observation remains pending.
 
-Authority: [ticket 04](issues/04-emulator-live-traffic.md), the
+Authority: [Record emulator appearance and nonprivileged live traffic](issues/04-emulator-live-traffic.md), the
 [canonical styled graph contract](../btop-graph-spec/issues/04-screen-seam-contract.md#acceptance-and-test-migration),
 and inherited [port acceptance/evidence rules](../nload-rust-port/spec.md#10-acceptance-matrix-and-verification-procedure).
 The newer styled contract supersedes affected ASCII presentation promises.
+
+**Current applicability (2026-10-08 review follow-up):** Sections below record
+the original ticket-04 source/artifact and observations. The graph logic has since
+changed at `5e4661164f7afda85c266b2a45ce730276c71bad`; those old release/live
+runs are historical evidence, not validation of the corrected artifact. Current
+gates and fresh live smoke are linked in the appended follow-up. The checklist
+and blank human template now identify the corrected durable artifact. All human
+observations remain pending.
 
 ## Ancestry and scope
 
@@ -193,3 +201,39 @@ establish styled palette/font/text contrast or the required exact 60×16/80×24
 checks. Its successful handled exits are historical context, not new observations.
 Ticket 02's current deterministic glyph/palette/state coverage and release PTYs
 are useful scripted evidence; neither is a substitute for T14 visual evidence.
+
+## Review follow-up — corrected artifact and fresh validation — 2026-10-08
+
+Source: `5e4661164f7afda85c266b2a45ce730276c71bad` on
+`implement/btop-review-fixes`, based on clean integration `a2214c6`. The correction
+removes additive graph-dot rounding promotion. Build output is now at the durable
+path `/mnt/programming/rust/nload-rs/target/btop-review-fixes/release/nload-rs`,
+SHA-256 `d39b77045a2c09ac8aebac41d1a5ef3ca4593d806f90fa3a888578dd7c8b49d7`.
+It was built from the review-fix source worktree; the permanent checkout's
+integration branch still points to `a2214c6` at recording time. The artifact can
+be exercised there directly; source applicability must be recorded separately.
+
+Fresh successful checks on corrected source/artifact:
+
+- `cargo fmt --check`; `cargo test --locked`: **115 unit + 16 PTY/decoder**.
+- `cargo build --release --locked --target-dir /mnt/programming/rust/nload-rs/target/btop-review-fixes`.
+- `NLOAD_RS_PTY_BINARY=/mnt/programming/rust/nload-rs/target/btop-review-fixes/release/nload-rs cargo test --locked --test linux_pty`:
+  **16 passed**, including styled exits, backpressure, small/resize recovery and
+  colored locale/NO_COLOR checks.
+- Ordinary nonprivileged loopback UDP with the existing generator's two-second
+  low/high/idle phases, twice, at **60×16 and 80×24**. Discovery, all-arrow
+  selection, separate 2.00/4.00 MBit/s labels, advancing totals, nonzero graphs,
+  all twelve foreground indices, measured-zero idle with older traffic retained,
+  and q/status-0/OS restoration passed. Each run received 634 datagrams over
+  12.002 seconds with actual RX/TX proc deltas of 5,211,480 bytes per direction.
+
+Actual checkpoint values, generator output, gate commands, artifact identity and
+Standards/Spec resolutions are in [Review fixes — Standards and Spec evidence](review-fixes-evidence.md).
+The original [live-smoke transcript](04-live-smoke.txt) and `/tmp/opencode/nload-btop-04`
+paths above retain provenance only. They are not required for the new human runs.
+
+Use the updated [runnable styled-graph emulator checklist](04-emulator-checklist.md)
+from `/mnt/programming/rust/nload-rs` and return the
+[human emulator report template](04-human-report-template.md) with the corrected
+artifact identity. **T14, V05-emulator and ordinary-emulator D04 remain pending;
+this ticket is blocked / awaiting-human and final acceptance remains blocked.**

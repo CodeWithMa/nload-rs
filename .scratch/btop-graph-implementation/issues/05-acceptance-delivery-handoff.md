@@ -5,10 +5,10 @@
 Authority: the [styled graph implementation handoff specification](../../btop-graph-spec/spec.md), its [canonical contract](../../btop-graph-spec/issues/04-screen-seam-contract.md#resolution--2026-10-07--alice-opencode-session-styled-graph-contract), and unaffected requirements and evidence rules in the [minimal Rust port specification](../../nload-rust-port/spec.md).
 
 **Blocked by:**
-- [03: Verify styled output under backpressure and interrupted exits](03-styled-output-backpressure-exits.md).
+- [03: Verify styled output under backpressure and interrupted exits](03-styled-output-backpressure-exits.md) (closed; prerequisite satisfied).
 - [04: Record emulator appearance and nonprivileged live traffic](04-emulator-live-traffic.md).
 
-**Status:** ready-for-agent
+**Status:** blocked / awaiting ticket 04 human evidence
 
 - [ ] Audit every governing requirement against deterministic tests, Linux PTY results, recorded emulator observations, live smoke, or artifact review as applicable. Maintain exact case-to-test/manual mappings for V01–V08, affected S03/S07/S09/S11/S12, T01/T08–T14, and inherited behavior. No unrun evidence is counted as passing.
 - [ ] Make the supersession of earlier ASCII graph thresholds, single-sample-per-cell wording, ASCII-row seams, and affected output/restoration promises explicit in implementation documentation and verification records. Preserve the earlier port specification as historical authority rather than rewriting its account of the earlier application.

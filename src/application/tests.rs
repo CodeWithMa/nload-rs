@@ -533,25 +533,49 @@ fn colored_backpressure_coalesces_navigation_and_resize_without_stale_frames_or_
     assert!(h.stderr.is_empty());
 }
 
+#[derive(Clone, Copy, Debug)]
+enum ColoredExit {
+    Quit,
+    UppercaseQuit,
+    ControlC,
+    Interrupt,
+    Terminate,
+    InputEof,
+}
+
+impl ColoredExit {
+    fn tick(self) -> Tick {
+        match self {
+            Self::Quit => Tick::input(SAMPLE_NS + 1, b"q"),
+            Self::UppercaseQuit => Tick::input(SAMPLE_NS + 1, b"Q"),
+            Self::ControlC => Tick::input(SAMPLE_NS + 1, b"\x03"),
+            Self::Interrupt => Tick::signal(SECOND, Shutdown::Interrupt),
+            Self::Terminate => Tick::signal(SECOND, Shutdown::Terminate),
+            Self::InputEof => Tick::input(SAMPLE_NS + 1, b""),
+        }
+    }
+}
+
 #[test]
 fn handled_exits_after_every_colored_output_prefix_cancel_reset_and_restore() {
     let old = observed_wire(0, 60, 16, 1);
     assert!(String::from_utf8_lossy(&old).contains("\x1b[38;5;219m⢸"));
-    for cause in 0..5 {
+    for (cause, status) in [
+        (ColoredExit::Quit, 0),
+        (ColoredExit::UppercaseQuit, 0),
+        (ColoredExit::ControlC, 130),
+        (ColoredExit::Interrupt, 130),
+        (ColoredExit::Terminate, 143),
+    ] {
         for split in 1..old.len() {
             // Exit at the next deadline: shutdown must preempt that acquisition
             // and any queued input/resize/output, even inside a UTF-8/SGR prefix.
-            let exit = match cause {
-                0 => Tick::input(SAMPLE_NS + 1, b"q"),
-                1 => Tick::input(SAMPLE_NS + 1, b"Q"),
-                2 => Tick::input(SAMPLE_NS + 1, b"\x03"),
-                3 => Tick::signal(SECOND, Shutdown::Interrupt),
-                _ => Tick::signal(SECOND, Shutdown::Terminate),
-            };
+            let exit = cause.tick();
             let mut h = colored_harness(vec![output_tick(SAMPLE_NS, Some(Ok(split))), exit]);
             assert_eq!(
                 h.run(&args(&["-i", "1", "-o", "1"])),
-                [0, 0, 130, 130, 143][cause]
+                status,
+                "{cause:?}, split {split}"
             );
             assert_eq!(h.effects.base.script.borrow().emitted, old[..split]);
             assert_eq!(h.counters.calls, 2);
@@ -568,56 +592,80 @@ fn handled_exits_after_every_colored_output_prefix_cancel_reset_and_restore() {
 
 #[test]
 fn colored_runtime_faults_and_panics_restore_before_diagnostics_and_prior_hook_probe() {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Fault {
+        InputEof,
+        InputBrokenPipe,
+        OutputBrokenPipe,
+        Clock,
+        Poll,
+        Resize,
+        SignalDrain,
+        WritePanic,
+        ClockRegression,
+        AcquisitionPanic,
+    }
     let old = observed_wire(0, 60, 16, 1);
     let split = old
         .windows(3)
         .position(|bytes| bytes == "⢸".as_bytes())
         .unwrap()
         + 2;
-    for variant in 0..10 {
+    for fault in [
+        Fault::InputEof,
+        Fault::InputBrokenPipe,
+        Fault::OutputBrokenPipe,
+        Fault::Clock,
+        Fault::Poll,
+        Fault::Resize,
+        Fault::SignalDrain,
+        Fault::WritePanic,
+        Fault::ClockRegression,
+        Fault::AcquisitionPanic,
+    ] {
         let mut failure = Tick::input(SAMPLE_NS + 1, b"x");
-        if variant == 0 {
+        if fault == Fault::InputEof {
             failure.input.clear();
         }
-        if variant == 5 {
+        if fault == Fault::Resize {
             failure.notifications.resized = true;
         }
-        if variant == 9 {
+        if fault == Fault::AcquisitionPanic {
             failure.at = SECOND;
         }
         failure.on_wait = Some(Box::new(move |effects| {
             let mut script = effects.script.borrow_mut();
-            match variant {
-                1 => {
+            match fault {
+                Fault::InputBrokenPipe => {
                     script.reads.clear();
                     script
                         .reads
                         .push_back(Err(io::ErrorKind::BrokenPipe.into()));
                 }
-                2 => script
+                Fault::OutputBrokenPipe => script
                     .writes
                     .push_back(Err(io::ErrorKind::BrokenPipe.into())),
-                3 => effects
+                Fault::Clock => effects
                     .clock
                     .0
                     .borrow_mut()
                     .readings
                     .push_back(Err(io::Error::other("runtime clock fault"))),
-                4 => script
+                Fault::Poll => script
                     .waits
                     .push_back(Err(io::Error::other("runtime poll fault"))),
-                5 => script
+                Fault::Resize => script
                     .dimensions
                     .push_back(Err(io::Error::other("runtime resize fault"))),
-                6 => script
+                Fault::SignalDrain => script
                     .notifications
                     .push_back(Err(io::Error::other("runtime signal fault"))),
-                7 => script.panic_on_write = true,
-                8 => effects.clock.0.borrow_mut().readings.push_back(Ok(0)),
-                _ => {}
+                Fault::WritePanic => script.panic_on_write = true,
+                Fault::ClockRegression => effects.clock.0.borrow_mut().readings.push_back(Ok(0)),
+                Fault::InputEof | Fault::AcquisitionPanic => {}
             }
             // Poll failure needs another wait; keep the colored prefix blocked.
-            if variant == 4 {
+            if fault == Fault::Poll {
                 script
                     .writes
                     .push_back(Err(io::ErrorKind::WouldBlock.into()));
@@ -625,21 +673,17 @@ fn colored_runtime_faults_and_panics_restore_before_diagnostics_and_prior_hook_p
         }));
         let mut h = colored_harness(vec![output_tick(SAMPLE_NS, Some(Ok(split))), failure]);
         h.probe_hook = true;
-        if variant == 9 {
+        if fault == Fault::AcquisitionPanic {
             h.counters.panic_at = Some(3);
         }
-        assert_eq!(
-            h.run(&args(&["-i", "1", "-o", "1"])),
-            1,
-            "variant {variant}"
-        );
+        assert_eq!(h.run(&args(&["-i", "1", "-o", "1"])), 1, "{fault:?}");
         assert_eq!(
             h.effects.base.script.borrow().emitted,
             old[..split],
-            "variant {variant}"
+            "{fault:?}"
         );
         assert!(!h.stderr.is_empty());
-        if matches!(variant, 7 | 9) {
+        if matches!(fault, Fault::WritePanic | Fault::AcquisitionPanic) {
             assert!(String::from_utf8_lossy(&h.stderr).contains("caught panic"));
         }
         h.restored();
@@ -662,15 +706,15 @@ fn colored_exit_cleanup_errors_and_panics_preserve_status_and_attempt_all_stages
         .unwrap()
         + 1;
     for panics in [false, true] {
-        for cause in 0..6 {
-            let exit = match cause {
-                0 => Tick::input(SAMPLE_NS + 1, b"q"),
-                1 => Tick::input(SAMPLE_NS + 1, b"Q"),
-                2 => Tick::input(SAMPLE_NS + 1, b"\x03"),
-                3 => Tick::signal(SECOND, Shutdown::Interrupt),
-                4 => Tick::signal(SECOND, Shutdown::Terminate),
-                _ => Tick::input(SAMPLE_NS + 1, b""), // fatal input EOF
-            };
+        for (cause, status) in [
+            (ColoredExit::Quit, 1),
+            (ColoredExit::UppercaseQuit, 1),
+            (ColoredExit::ControlC, 130),
+            (ColoredExit::Interrupt, 130),
+            (ColoredExit::Terminate, 143),
+            (ColoredExit::InputEof, 1),
+        ] {
+            let exit = cause.tick();
             let mut h = colored_harness(vec![output_tick(SAMPLE_NS, Some(Ok(split))), exit]);
             h.probe_hook = true;
             for operation in [
@@ -690,7 +734,8 @@ fn colored_exit_cleanup_errors_and_panics_preserve_status_and_attempt_all_stages
             }
             assert_eq!(
                 h.run(&args(&["-i", "1", "-o", "1"])),
-                [1, 1, 130, 130, 143, 1][cause]
+                status,
+                "{cause:?}, cleanup panics={panics}"
             );
             h.restored();
             assert_eq!(h.effects.base.script.borrow().emitted, old[..split]);

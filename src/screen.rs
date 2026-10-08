@@ -174,7 +174,9 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: &[
     {
         let position = capacity - fitted + offset;
         let fraction = (sample.rate / view.ceiling as f64).clamp(0.0, 1.0);
-        let dots = ((fraction * (4 * height) as f64 + 0.5).floor() as usize).min(4 * height);
+        // Positive ties round upward without an addition that could promote the
+        // representable value immediately below a half step to that step.
+        let dots = ((fraction * (4 * height) as f64).round() as usize).min(4 * height);
         // Standard Unicode dot numbers, bottom-to-top in each independent half.
         let numbers = if position % 2 == 0 {
             [7, 3, 2, 1]
@@ -564,6 +566,78 @@ mod tests {
                         "Ttl: 1.00 kByte",
                     ]
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn adjacent_rates_at_half_steps_do_not_gain_a_dot_from_additive_rounding() {
+        // Literal full columns from the Unicode dot diagram. At H=10 the
+        // default ceiling's first threshold is exactly 16384 bytes/s. The H=6
+        // power-of-two ceiling keeps normalization exact before scaling.
+        for (width, height, ceiling, halfway, below, at) in [
+            (80, 24, 1_310_720, 16_384.0_f64, "          ", "         ⢀"),
+            (80, 24, 1_310_720, 49_152.0, "         ⢀", "         ⢠"),
+            (80, 24, 1_310_720, 147_456.0, "         ⢸", "        ⢀⢸"),
+            (80, 24, 1_310_720, 638_976.0, "     ⢰⢸⢸⢸⢸", "     ⢸⢸⢸⢸⢸"),
+            (60, 16, 128, 8.0 / 3.0, "      ", "     ⢀"),
+            (60, 16, 128, 8.0, "     ⢀", "     ⢠"),
+            (60, 16, 128, 24.0, "     ⢸", "    ⢀⢸"),
+            (60, 16, 128, 104.0, " ⢰⢸⢸⢸⢸", " ⢸⢸⢸⢸⢸"),
+        ] {
+            for (name, rate, expected) in [
+                ("below", halfway.next_down(), below),
+                ("at", halfway, at),
+                ("above", halfway.next_up(), at),
+            ] {
+                let history = samples(&[rate]);
+                let mut selected = view(&history);
+                selected.incoming.ceiling = ceiling;
+                selected.outgoing.ceiling = ceiling;
+                let frame = super::render(selected, width, height);
+                let rows = decoded(&frame);
+                let graph_height = (height - 4) / 2;
+                for top in [3, 4 + graph_height] {
+                    let actual: String = rows[top..top + graph_height]
+                        .iter()
+                        .map(|row| row[width - 31].0)
+                        .collect();
+                    assert_eq!(
+                        actual, expected,
+                        "H={graph_height}, c={ceiling}, {name}: {rate:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn intermediate_normalization_ties_use_the_normalized_rate_not_a_rate_threshold() {
+        // Division/multiplication themselves can land on a half step for
+        // neighboring input rates. Preserve the contract's r/c then 4H order,
+        // rather than changing it to compare r with a reconstructed threshold.
+        for (width, height, ceiling, halfway, expected) in [
+            (80, 24, 1_310_720, 114_688.0_f64, "         ⢸"),
+            (60, 16, 48, 1.0, "     ⢀"),
+            (60, 16, 1_310_720, 81_920.0 / 3.0, "     ⢀"),
+        ] {
+            for rate in [halfway.next_down(), halfway, halfway.next_up()] {
+                let history = samples(&[rate]);
+                let mut selected = view(&history);
+                selected.incoming.ceiling = ceiling;
+                selected.outgoing.ceiling = ceiling;
+                let rows = decoded(&super::render(selected, width, height));
+                let graph_height = (height - 4) / 2;
+                for top in [3, 4 + graph_height] {
+                    let actual: String = rows[top..top + graph_height]
+                        .iter()
+                        .map(|row| row[width - 31].0)
+                        .collect();
+                    assert_eq!(
+                        actual, expected,
+                        "H={graph_height}, c={ceiling}, r={rate:?}"
+                    );
+                }
             }
         }
     }

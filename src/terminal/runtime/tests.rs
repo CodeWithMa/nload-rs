@@ -2,17 +2,17 @@
 
 use super::scripted::{Call, ScriptedEffects};
 use super::*;
+use crate::arguments::Ceilings;
+use crate::monitor::Monitor;
+use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
 
-fn frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
-    use crate::arguments::Ceilings;
-    use crate::monitor::Monitor;
-    use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
-    let monitor = Monitor::new(
+fn baseline_monitor(name: &[u8], ceilings: Ceilings) -> Monitor {
+    Monitor::new(
         StartupSelection {
             names: vec![name.to_vec()],
             selected: 0,
         },
-        Ceilings::default(),
+        ceilings,
         0,
         |_| {
             CounterOutcome::Readable(Counters {
@@ -20,29 +20,20 @@ fn frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
                 outgoing: 0,
             })
         },
-    );
+    )
+}
+
+fn frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
+    let monitor = baseline_monitor(name, Ceilings::default());
     crate::screen::render(monitor.selected_view(), width, height)
 }
 
 fn colored_frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
-    use crate::arguments::Ceilings;
-    use crate::monitor::Monitor;
-    use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
-    let mut monitor = Monitor::new(
-        StartupSelection {
-            names: vec![name.to_vec()],
-            selected: 0,
-        },
+    let mut monitor = baseline_monitor(
+        name,
         Ceilings {
             incoming: 24,
             outgoing: 24,
-        },
-        0,
-        |_| {
-            CounterOutcome::Readable(Counters {
-                incoming: 0,
-                outgoing: 0,
-            })
         },
     );
     for (at, total) in [(1_000_000_000, 24), (2_000_000_000, 48)] {

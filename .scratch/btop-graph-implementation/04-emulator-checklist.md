@@ -8,8 +8,11 @@ pending; a screenshot or PTY trace alone does not establish all observations.
 ## 1. Identify the tested source, executable and emulator
 
 Use two terminal windows/tabs, A for the UI and B for traffic/size queries,
-connected to the **same Linux network namespace**. Use the worktree
-`/tmp/opencode/nload-btop-04` in both. Commands below are relative to its root.
+connected to the **same Linux network namespace**. Use the permanent checkout
+`/mnt/programming/rust/nload-rs` on `integration/btop-styled-graphs` in both.
+Commands below are relative to its root. The corrected release artifact is
+`target/btop-review-fixes/release/nload-rs`; it is already built at this durable
+path from the source revision identified below.
 Use an ordinary interactive shell so nonzero exit statuses can be recorded.
 
 In A, record:
@@ -19,19 +22,33 @@ pwd
 git branch --show-current
 git rev-parse HEAD
 git status --short
-git diff 48584d0 -- src tests Cargo.toml Cargo.lock
-cargo build --release --locked
-./target/release/nload-rs --version
-sha256sum ./target/release/nload-rs
+git diff 5e4661164f7afda85c266b2a45ce730276c71bad -- src tests Cargo.toml Cargo.lock
+./target/btop-review-fixes/release/nload-rs --version
+sha256sum ./target/btop-review-fixes/release/nload-rs
 rustc --version --verbose
 python3 -c 'import os; print("uid/euid:", os.getuid(), os.geteuid()); print({k: os.environ.get(k) for k in ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "LC_ALL", "NO_COLOR", "TMUX", "STY", "SSH_TTY")}); print("network namespace:", os.readlink("/proc/self/ns/net"))'
 tty
 stty size
 ```
 
-The agent's tested source is `48584d006ea3b3184f56e7bbae24f2254425e946`, with no
-ticket-04 executable delta; version `nload-rs 0.1.1`; artifact SHA-256
-`50d9a750738bf4381eabd6fb72a96967098bdd6ba90067f3d2f255c5da176746`.
+The agent's tested source is `5e4661164f7afda85c266b2a45ce730276c71bad`
+(`implement/btop-review-fixes`); version `nload-rs 0.1.1`; artifact SHA-256
+`d39b77045a2c09ac8aebac41d1a5ef3ca4593d806f90fa3a888578dd7c8b49d7`.
+The integration checkout was still at `a2214c6` when this artifact was built from
+the review-fix worktree. You can run the durable corrected executable directly
+there and record the checkout/source delta. Once integration contains the fix
+and the executable-source diff above is empty, rebuild if needed with:
+
+```sh
+cargo build --release --locked --target-dir target/btop-review-fixes
+sha256sum ./target/btop-review-fixes/release/nload-rs
+```
+
+Building from the older integration source would replace the corrected artifact
+with the pre-fix program. The original ticket-04 source `48584d0`, artifact
+`50d9a750…`, and temporary worktree in [historical live evidence](04-evidence.md)
+are provenance, not current corrected-artifact validation. Fresh agent release,
+PTY and live checks are in [Review fixes — Standards and Spec evidence](review-fixes-evidence.md).
 If your HEAD, executable delta or artifact differs, include that fact in the report
 so applicability can be reviewed. A later documentation-only HEAD is compatible
 when executable inputs and artifact are unchanged. Rebuilds need not be identical.
@@ -81,7 +98,7 @@ and adapt navigation accordingly. The ordinary local generator below monitors
 
    ```sh
    python3 -c 'print("TICKET04 RUN A prior-screen marker — q")'
-   ./target/release/nload-rs -i 2048 -o 4096
+   ./target/btop-review-fixes/release/nload-rs -i 2048 -o 4096
    ```
 
 2. Record the initial header, ideally baseline status (`Waiting for rate sample`,
@@ -137,7 +154,7 @@ and adapt navigation accordingly. The ordinary local generator below monitors
 
    ```sh
    python3 -c 'print("TICKET04 RUN B prior-screen marker — typed Ctrl+C")'
-   ./target/release/nload-rs -i 2048 -o 4096 lo
+   ./target/btop-review-fixes/release/nload-rs -i 2048 -o 4096 lo
    ```
 
 2. In B rerun the **same** default 60-second generator command from Run A. At
@@ -178,7 +195,7 @@ and adapt navigation accordingly. The ordinary local generator below monitors
    status; the Python wrapper's shell status is a separate value.
 
    ```sh
-   python3 -c 'import signal, subprocess, time; print("TICKET04 RUN C prior-screen marker — SIGTERM after 25 seconds", flush=True); p = subprocess.Popen(["./target/release/nload-rs", "-i", "2048", "-o", "4096", "lo"]); time.sleep(25); p.send_signal(signal.SIGTERM); print("Run C SIGTERM child status:", p.wait(), flush=True)'
+   python3 -c 'import signal, subprocess, time; print("TICKET04 RUN C prior-screen marker — SIGTERM after 25 seconds", flush=True); p = subprocess.Popen(["./target/btop-review-fixes/release/nload-rs", "-i", "2048", "-o", "4096", "lo"]); time.sleep(25); p.send_signal(signal.SIGTERM); print("Run C SIGTERM child status:", p.wait(), flush=True)'
    ```
 
 2. Immediately in B start a shorter generator:

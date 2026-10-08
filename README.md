@@ -6,10 +6,11 @@ Inspired by [nload](https://github.com/rolandriegel/nload) by Roland Riegel.
 
 ## Implementation status
 
-The application runs a single-interface view with incoming/outgoing colored
+The application runs a single-interface view with incoming/outgoing
 Braille graphs, traffic statistics and arrow-key navigation through a naturally
 sorted interface collection that grows as interfaces appear during monitoring.
-Incoming uses indigo/lavender grades; outgoing uses magenta.
+Graphs use the terminal's default foreground unless `--color` is supplied.
+With colors enabled, incoming uses indigo/lavender grades; outgoing uses magenta.
 The [verified styled graph handoff](.scratch/btop-graph-implementation/handoff.md)
 links completed build, deterministic, Linux PTY, human emulator, live-traffic,
 and artifact acceptance for version 0.1.1. The
@@ -36,11 +37,13 @@ cargo build --release --locked
 ```
 
 Interactive runs require terminal stdin/stdout (stderr may be redirected), UTF-8
-output support, a font with Unicode Braille coverage, and xterm-256color support.
+output support, and a font with Unicode Braille coverage. `--color` additionally
+requires xterm-256color support.
 Unset/empty `TERM` and exact `dumb`/`linux` are rejected before terminal mutation;
 other values declare assumed support, without capability or locale probes.
-Full-size views always emit colored Braille, including under `NO_COLOR` and any
-locale declaration. There is no ASCII mode or compatibility fallback. Below
+Colors are off by default; `--color` enables the existing graph palettes even
+under `NO_COLOR`. Locale declarations do not affect this choice. There is no
+ASCII mode or compatibility fallback. Below
 60×16, a bounded default-style warning replaces the graphs while sampling,
 navigation and quit remain active.
 
@@ -71,6 +74,7 @@ or reveal the fitting suffix (60 samples at 60×16, 100 at 80×24).
 
 ```sh
 ./target/release/nload-rs -i 20480 -o 5120 eth0
+./target/release/nload-rs --color eth0
 ./target/release/nload-rs --help
 ./target/release/nload-rs --version
 ```
@@ -101,6 +105,9 @@ supersedes the historical ASCII thresholds, one-sample-per-cell presentation,
 ASCII-row interface, and affected output/restoration promises. Graph presentation
 is inspired by btop and implemented independently from standard Unicode/ANSI
 facts, without adding dependencies.
+The current default-off color policy supersedes that contract's always-colored
+output: `--color` restores the styled graphs, while default-style resets remain
+part of the frame and restoration protocols in both modes.
 
 The [dynamic interface discovery specification](.scratch/dynamic-interface-discovery/spec.md)
 supersedes the historical Rust-port promises of startup-only membership and

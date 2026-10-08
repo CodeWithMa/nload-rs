@@ -26,7 +26,7 @@ fn baseline_monitor(name: &[u8], ceilings: Ceilings) -> Monitor {
 
 fn frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
     let monitor = baseline_monitor(name, Ceilings::default());
-    crate::screen::render(monitor.selected_view(), width, height)
+    crate::screen::render(monitor.selected_view(), width, height, true)
 }
 
 fn colored_frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
@@ -45,7 +45,7 @@ fn colored_frame(name: &[u8], width: usize, height: usize) -> crate::screen::Fra
             })
         });
     }
-    crate::screen::render(monitor.selected_view(), width, height)
+    crate::screen::render(monitor.selected_view(), width, height, true)
 }
 
 // The transport oracle takes the screen's public encoded rows as payload, with

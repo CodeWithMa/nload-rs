@@ -58,6 +58,7 @@ fn informational(stdout: &mut impl Write, text: String) -> ExitReport {
 }
 
 pub(crate) fn linux(config: RunConfig) -> ExitReport {
+    let color = config.color;
     let mut counters = ProcSampler::default();
     let mut session = Session::new(LinuxTerminal::new());
     interactive(
@@ -72,6 +73,7 @@ pub(crate) fn linux(config: RunConfig) -> ExitReport {
                 &mut session.runtime(clock),
                 deadline,
                 dimensions,
+                color,
             )
             .map_err(Failure::from)
         },
@@ -169,6 +171,7 @@ fn drive<C: CounterSource, O: RuntimeEffects>(
     runtime: &mut Runtime<O>,
     mut deadline: u64,
     mut dimensions: (usize, usize),
+    color: bool,
 ) -> io::Result<Shutdown> {
     let mut dirty = true;
     let mut resized = false;
@@ -229,7 +232,7 @@ fn drive<C: CounterSource, O: RuntimeEffects>(
         }
         resized |= notifications.resized;
         if dirty {
-            let frame = screen::render(monitor.selected_view(), dimensions.0, dimensions.1);
+            let frame = screen::render(monitor.selected_view(), dimensions.0, dimensions.1, color);
             if runtime.queue_frame(&frame)? {
                 dirty = false;
             }

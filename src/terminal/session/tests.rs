@@ -242,7 +242,7 @@ fn explicit_and_drop_cleanup_cancel_partial_sgr_and_reset_before_screen_restorat
             outgoing: 128,
         })
     });
-    let frame = crate::screen::render(monitor.selected_view(), 60, 16);
+    let frame = crate::screen::render(monitor.selected_view(), 60, 16, true);
     for row in frame
         .encoded_rows()
         .iter()

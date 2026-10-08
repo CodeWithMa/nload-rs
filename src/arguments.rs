@@ -2,7 +2,7 @@
 
 //! OS argument tokens to informational output or a validated run configuration.
 //!
-//! Owns argument grammar, graph ceilings and Cargo-authoritative version output.
+//! Owns argument grammar, graph ceilings/colors and Cargo-authoritative version output.
 //! Must not initialize clocks, discover interfaces or touch terminal state.
 
 use std::ffi::OsString;
@@ -33,6 +33,7 @@ pub(crate) struct RunConfig {
     /// Original bytes, never a displayed/escaped or lossy name.
     pub(crate) interface: Option<Vec<u8>>,
     pub(crate) ceilings: Ceilings,
+    pub(crate) color: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +72,7 @@ pub(crate) fn parse(
     let mut config = RunConfig {
         interface: None,
         ceilings: Ceilings::default(),
+        color: false,
     };
     let mut options = true;
     let mut tokens = tokens.iter();
@@ -80,6 +82,10 @@ pub(crate) fn parse(
             match bytes {
                 b"--" => {
                     options = false;
+                    continue;
+                }
+                b"--color" => {
+                    config.color = true;
                     continue;
                 }
                 b"-i" | b"-o" => {
@@ -137,7 +143,7 @@ pub(crate) fn version_text() -> String {
 
 pub(crate) fn help_text() -> String {
     format!(
-        "Usage: {name} [-i VALUE] [-o VALUE] [--] [INTERFACE]\n\
+        "Usage: {name} [--color] [-i VALUE] [-o VALUE] [--] [INTERFACE]\n\
          \x20      {name} --help\n\
          \x20      {name} --version\n\n\
          Monitor one interface; arrows navigate the naturally sorted collection.\n\
@@ -151,8 +157,9 @@ pub(crate) fn help_text() -> String {
          = 128 bytes/s), from 1 through 144115188075855871.\n\
          Each direction defaults independently to {default} kBit/s (10.00 MBit/s).\n\
          Zero restores that direction's default; repeated options use the last value.\n\
-         Ceiling values must be separate tokens; options may precede or follow a name.\n\
-         --help and --version are standalone; no short aliases are accepted.\n",
+          Ceiling values must be separate tokens; options may precede or follow a name.\n\
+          --color   Enable colored Braille graphs (off by default; ignores NO_COLOR).\n\
+          --help and --version are standalone; no short aliases are accepted.\n",
         name = env!("CARGO_PKG_NAME"),
         default = DEFAULT_CEILING_KBIT,
     )
@@ -188,6 +195,9 @@ mod tests {
             "INTERFACE",
             "-i VALUE",
             "-o VALUE",
+            "--color",
+            "off by default",
+            "ignores NO_COLOR",
             "--help",
             "--version",
             "1024 Bit/s",
@@ -218,6 +228,9 @@ mod tests {
             vec!["-o", "10", "--version"],
             vec!["--help", "--"],
             vec!["--version", "--version"],
+            vec!["--color", "--help"],
+            vec!["--version", "--color"],
+            vec!["--color=always"],
             vec!["--", "eth0", "eth1"],
         ] {
             let error = invoke(&tokens).expect_err(&format!("accepted {tokens:?}"));
@@ -232,13 +245,33 @@ mod tests {
             panic!("expected run");
         };
         assert_eq!(config.interface, Some(name));
-        for name in ["-eth0", "--help", "--version", "-i", "--"] {
+        for name in ["-eth0", "--help", "--version", "--color", "-i", "--"] {
             assert_eq!(run(&["--", name]).interface, Some(name.as_bytes().to_vec()));
         }
         assert_eq!(run(&["ETH0"]).interface, Some(b"ETH0".to_vec()));
         assert_eq!(run(&["--"]).interface, None);
         assert_eq!(run(&[""]).interface, Some(vec![])); // selection validates existence
         assert!(invoke(&["--", "eth0", "-i", "1"]).is_err());
+    }
+
+    #[test]
+    fn graph_colors_are_opt_in_and_follow_option_grammar() {
+        for tokens in [vec![], vec!["eth0"], vec!["--", "--color"]] {
+            assert!(!run(&tokens).color);
+        }
+        for tokens in [
+            vec!["--color"],
+            vec!["--color", "eth0"],
+            vec!["eth0", "--color"],
+            vec!["--color", "--color"],
+            vec!["-i", "1", "--color", "-o", "2", "eth0"],
+        ] {
+            assert!(run(&tokens).color);
+        }
+        assert_eq!(
+            run(&["--color", "-i", "1", "-o", "2", "eth0"]),
+            run(&["eth0", "-i", "1", "--color", "-o", "2"])
+        );
     }
 
     #[test]

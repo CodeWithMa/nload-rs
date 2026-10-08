@@ -132,6 +132,7 @@ struct Product {
     output: Pty,
     bytes: Vec<u8>,
     pending: Vec<u8>,
+    color: bool,
 }
 
 fn command() -> Command {
@@ -154,12 +155,17 @@ impl Product {
             .stdout(output.slave.try_clone().unwrap())
             .stderr(Stdio::piped());
         setup(&mut command, &input, &output);
+        let color = command
+            .get_args()
+            .take_while(|arg| *arg != "--")
+            .any(|arg| arg == "--color");
         Self {
             child: command.spawn().unwrap(),
             input,
             output,
             bytes: Vec::new(),
             pending: Vec::new(),
+            color,
         }
     }
 
@@ -239,7 +245,7 @@ impl Product {
                 };
                 let payload = &self.pending[body..end];
                 let (width, height) = geometry(payload);
-                let rows = decode_rows(payload, width, height);
+                let rows = decode_rows(payload, width, height, self.color);
                 self.pending.drain(..end + END.len());
                 if predicate(&rows) {
                     return rows;
@@ -311,8 +317,17 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[test]
 fn decoder_counts_styled_braille_as_cells_and_preserves_default_text() {
     let body = "\x1b[1;1H\x1b[0m\x1b[38;5;183m⢸⣿\x1b[0m  Curr: 1\x1b[0m\x1b[2;1H\x1b[0m\x1b[38;5;96m⡇\x1b[0m\x1b[0m";
-    assert_eq!(decode_rows(body.as_bytes(), 11, 2), ["⢸⣿  Curr: 1", "⡇"]);
-    assert_eq!(decode_rows(b"", 0, 3), ["", "", ""]);
+    assert_eq!(
+        decode_rows(body.as_bytes(), 11, 2, true),
+        ["⢸⣿  Curr: 1", "⡇"]
+    );
+    assert_eq!(decode_rows(b"", 0, 3, false), ["", "", ""]);
+    let plain = "\x1b[1;1H\x1b[0m⢸⣿  Curr: 1\x1b[0m\x1b[2;1H\x1b[0m⡇\x1b[0m";
+    assert_eq!(
+        decode_rows(plain.as_bytes(), 11, 2, false),
+        ["⢸⣿  Curr: 1", "⡇"]
+    );
+    assert!(std::panic::catch_unwind(|| decode_rows(body.as_bytes(), 11, 2, false)).is_err());
 }
 
 #[test]
@@ -339,20 +354,20 @@ fn decoder_rejects_unknown_protocol_style_leaks_and_cell_overflow() {
         "\x1b[1;1H\x1b[0m\x1b[38;5;60m⣿⢸\x1b[0m", // two cells in width one
     ] {
         assert!(
-            std::panic::catch_unwind(|| decode_rows(body.as_bytes(), 1, 1)).is_err(),
+            std::panic::catch_unwind(|| decode_rows(body.as_bytes(), 1, 1, true)).is_err(),
             "accepted {body:?}"
         );
     }
     for index in [60, 61, 98, 140, 146, 183, 96, 132, 133, 170, 176, 219] {
         let body = format!("\x1b[1;1H\x1b[0m\x1b[38;5;{index}m⣿\x1b[0m");
-        assert_eq!(decode_rows(body.as_bytes(), 1, 1), ["⣿"]);
+        assert_eq!(decode_rows(body.as_bytes(), 1, 1, true), ["⣿"]);
     }
 }
 
 /// Validate protocol rather than visual appearance. This is deliberately a
 /// whitelist, not a general ANSI stripper: SGR is zero-width, allowed Braille
 /// consumes one cell, and all other controls/Unicode/escapes are rejected.
-fn decode_rows(mut bytes: &[u8], width: usize, height: usize) -> Vec<String> {
+fn decode_rows(mut bytes: &[u8], width: usize, height: usize, color: bool) -> Vec<String> {
     let mut rows = vec![String::new(); height];
     let mut next_row = 1;
     while !bytes.is_empty() {
@@ -384,6 +399,7 @@ fn decode_rows(mut bytes: &[u8], width: usize, height: usize) -> Vec<String> {
                     foreground = false;
                     final_reset = true;
                 } else {
+                    assert!(color, "color is disabled");
                     assert!(
                         matches!(
                             parameters,
@@ -414,7 +430,10 @@ fn decode_rows(mut bytes: &[u8], width: usize, height: usize) -> Vec<String> {
                 let text = std::str::from_utf8(&bytes[..end]).unwrap();
                 for character in text.chars() {
                     if ('\u{2801}'..='\u{28ff}').contains(&character) {
-                        assert!(foreground, "Braille needs a palette foreground");
+                        assert_eq!(
+                            foreground, color,
+                            "Braille must match the chosen color mode"
+                        );
                     } else {
                         assert!(
                             (' '..='~').contains(&character),
@@ -524,7 +543,7 @@ fn loopback_burst() {
 
 fn colored_product() -> Product {
     let mut product = Product::spawn(60, 16, |command, _, _| {
-        command.args(["-i", "1", "-o", "1", "lo"]);
+        command.args(["--color", "-i", "1", "-o", "1", "lo"]);
     });
     product.frame(60, 16, |_| true);
     loopback_burst();
@@ -619,7 +638,7 @@ fn colored_backpressure_resumes_a_complete_large_frame_then_recovers_latest_resi
         let body = &remaining[..end];
         if find(body, b"\x1b[1000;1H").is_some() {
             assert!(find(body, b"\x1b[38;5;").is_some());
-            decode_rows(body, 1000, 1000);
+            decode_rows(body, 1000, 1000, true);
             saw_large = true;
         } else if find(body, b"\x1b[16;1H").is_none() {
             assert!(
@@ -778,15 +797,22 @@ fn small_startup_resize_sampling_navigation_and_quit_keep_bounded_rows() {
 }
 
 #[test]
-fn accepted_full_views_emit_colored_braille_under_no_color_and_locale_declarations() {
-    for (width, height, locale, no_color) in [
-        (60, 16, None, None),
-        (60, 16, Some("C"), Some("1")),
-        (80, 24, Some("C.UTF-8"), Some("")),
-        (80, 24, Some("not-a-probed-locale"), Some("1")),
+fn graph_colors_are_opt_in_under_no_color_and_locale_declarations() {
+    for (width, height, color, locale, no_color) in [
+        (60, 16, false, None, None),
+        (60, 16, false, Some("C"), Some("1")),
+        (80, 24, false, Some("C.UTF-8"), Some("")),
+        (80, 24, false, Some("not-a-probed-locale"), Some("1")),
+        (60, 16, true, None, None),
+        (60, 16, true, Some("C"), Some("1")),
+        (80, 24, true, Some("C.UTF-8"), Some("")),
+        (80, 24, true, Some("not-a-probed-locale"), Some("1")),
     ] {
         let mut product = Product::spawn(width, height, |command, _, _| {
             command.args(["-i", "1", "-o", "1", "lo"]);
+            if color {
+                command.arg("--color");
+            }
             if let Some(locale) = locale {
                 command.env("LC_ALL", locale).env("LANG", locale);
             } else {
@@ -819,13 +845,20 @@ fn accepted_full_views_emit_colored_braille_under_no_color_and_locale_declaratio
             assert_eq!(row.chars().nth(graph_width).unwrap_or(' '), ' ');
             assert_eq!(row.chars().nth(graph_width + 1).unwrap_or(' '), ' ');
         }
-        for index in [60, 61, 98, 140, 146, 183, 96, 132, 133, 170, 176, 219] {
-            assert!(find(&product.bytes, format!("\x1b[38;5;{index}m").as_bytes()).is_some());
+        if color {
+            for index in [60, 61, 98, 140, 146, 183, 96, 132, 133, 170, 176, 219] {
+                assert!(find(&product.bytes, format!("\x1b[38;5;{index}m").as_bytes()).is_some());
+            }
+        } else {
+            assert!(find(&product.bytes, b"\x1b[38;5;").is_none());
         }
         assert!(!product.bytes.contains(&b'\n'));
         assert!(!product.bytes.contains(&b'\r'));
         product.send(b"q");
         assert!(product.finish(0, true).is_empty()); // redirected stderr supported
+        if !color {
+            assert!(find(&product.bytes, b"\x1b[38;5;").is_none());
+        }
         product.assert_cleanup();
     }
 }

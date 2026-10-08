@@ -5,10 +5,10 @@
 //! Owns geometry, escaping, formatting, graph glyphs and small-terminal mode.
 //! Owns row encoding and default-style resets; terminal owns positioning, clearing
 //! and session commands. Adjacent observations share bottom-filled Braille cells;
-//! graph-row position selects an incoming or outgoing xterm-256color foreground.
+//! with color enabled, graph-row position selects a direction's xterm-256color foreground.
 //! Two samples per cell nominally span one second at the unchanged 500-ms cadence;
 //! delayed observations remain observation-spaced. Only the fitting suffix is read.
-//! Interactive output assumes UTF-8, Braille font coverage and xterm-256color.
+//! Interactive output assumes UTF-8 and Braille font coverage; colors assume xterm-256color.
 
 use crate::monitor::{DirectionView, SelectedView, ViewState};
 
@@ -90,7 +90,7 @@ impl Row {
 /// Exactly `height` logical rows of `width` terminal cells, including zero sizes.
 /// Views come from Monitor (positive ceilings, finite nonnegative rates and paired
 /// availability invariants). Dimensions affect presentation only, never history.
-pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize) -> Frame {
+pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize, color: bool) -> Frame {
     let mut rows = vec![
         Row {
             cells: vec![' '; width],
@@ -120,13 +120,13 @@ pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize) -> Fra
             &mut rows[2..outgoing_label],
             "Incoming",
             view.incoming,
-            &INCOMING_PALETTE,
+            color.then_some(&INCOMING_PALETTE),
         );
         direction(
             &mut rows[outgoing_label..],
             "Outgoing",
             view.outgoing,
-            &OUTGOING_PALETTE,
+            color.then_some(&OUTGOING_PALETTE),
         );
     }
     Frame {
@@ -145,7 +145,7 @@ fn status(state: ViewState) -> Option<&'static str> {
     }
 }
 
-fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: &[u8; 6]) {
+fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: Option<&[u8; 6]>) {
     // Ceilings are exact integer bytes/s, so use widened integer bit conversion.
     put(
         &mut rows[0],
@@ -160,10 +160,12 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: &[
     let graph_width = graph[0].cells.len() - STAT_WIDTH - GAP;
     for (index, row) in graph.iter_mut().enumerate() {
         row.statistics = Some(graph_width + GAP);
-        let k = height - 1 - index;
-        // Integer nearest-grade selection, including exact halfway-up ties.
-        let grade = (10 * k + height - 1) / (2 * (height - 1));
-        row.graph_foreground = Some(palette[grade]);
+        row.graph_foreground = palette.map(|palette| {
+            let k = height - 1 - index;
+            // Integer nearest-grade selection, including exact halfway-up ties.
+            let grade = (10 * k + height - 1) / (2 * (height - 1));
+            palette[grade]
+        });
     }
     let capacity = 2 * graph_width;
     let fitted = view.samples.len().min(capacity);
@@ -372,7 +374,7 @@ mod tests {
             (vec![1_310_720.0, 0.0, 1_310_720.0, 2_621_440.0], "⡇⣿"),
         ] {
             let history = samples(&rates);
-            let frame = super::render(view(&history), 60, 16);
+            let frame = super::render(view(&history), 60, 16, true);
             let padding = " ".repeat(30 - glyphs.chars().count());
             for (row, foreground) in [(3, 183), (10, 219)] {
                 assert_eq!(
@@ -384,9 +386,39 @@ mod tests {
     }
 
     #[test]
+    fn disabling_colors_preserves_graph_cells_and_statistics_at_each_geometry() {
+        let history = samples(&[1_310_720.0, 0.0, 655_360.0, 1_310_720.0]);
+        for (width, height) in [(60, 16), (61, 17), (80, 24), (81, 25), (59, 15)] {
+            let plain = super::render(view(&history), width, height, false);
+            let colored = super::render(view(&history), width, height, true);
+            assert_eq!(plain.dimensions(), colored.dimensions());
+            assert!(
+                plain
+                    .encoded_rows()
+                    .iter()
+                    .all(|row| !row.contains("38;5;"))
+            );
+            let plain_cells = decoded(&plain);
+            let colored_cells = decoded(&colored);
+            for (plain_row, colored_row) in plain_cells.iter().zip(&colored_cells) {
+                for (&(plain_glyph, foreground), &(colored_glyph, _)) in
+                    plain_row.iter().zip(colored_row)
+                {
+                    assert_eq!(plain_glyph, colored_glyph);
+                    assert_eq!(foreground, None);
+                }
+            }
+            if width >= 60 && height >= 16 {
+                assert!(plain_cells.iter().flatten().any(|&(c, _)| !c.is_ascii()));
+                assert!(colored_cells.iter().flatten().any(|&(_, fg)| fg.is_some()));
+            }
+        }
+    }
+
+    #[test]
     fn opaque_frame_retains_dimensions_and_encodes_trimmed_default_rows() {
         let history = samples(&[]);
-        let frame = super::render(view(&history), 60, 16);
+        let frame = super::render(view(&history), 60, 16, false);
         assert_eq!(frame.dimensions(), (60, 16));
         assert_eq!(frame.encoded_rows().len(), 16);
         assert_eq!(
@@ -399,7 +431,7 @@ mod tests {
             format!("\x1b[0m{}\x1b[0mCurr: 1.00 kBit/s\x1b[0m", " ".repeat(32))
         );
         for (width, height) in [(0, 0), (0, 5), (80, 0)] {
-            let frame = super::render(view(&history), width, height);
+            let frame = super::render(view(&history), width, height, false);
             assert_eq!(frame.dimensions(), (width, height));
             assert_eq!(frame.encoded_rows(), vec!["\x1b[0m\x1b[0m"; height]);
         }
@@ -417,7 +449,7 @@ mod tests {
     }
 
     // Test-side whitelist at the frame seam, independent of production encoding.
-    // Only nonblank Braille is colored; all text/space cells must be default.
+    // Only nonblank Braille may be colored; all text/space cells must be default.
     fn decoded(frame: &Frame) -> Vec<Vec<(char, Option<u8>)>> {
         let (width, height) = frame.dimensions();
         assert_eq!(frame.encoded_rows().len(), height);
@@ -450,9 +482,7 @@ mod tests {
                         remaining = rest;
                     } else {
                         let c = remaining.chars().next().unwrap();
-                        if ('\u{2801}'..='\u{28ff}').contains(&c) {
-                            assert!(foreground.is_some());
-                        } else {
+                        if !('\u{2801}'..='\u{28ff}').contains(&c) {
                             assert!((' '..='~').contains(&c));
                             assert_eq!(foreground, None, "styled text or blank");
                         }
@@ -470,7 +500,7 @@ mod tests {
     }
 
     fn render(view: SelectedView<'_>, width: usize, height: usize) -> Vec<String> {
-        let frame = super::render(view, width, height);
+        let frame = super::render(view, width, height, false);
         assert_eq!(frame.dimensions(), (width, height));
         decoded(&frame)
             .into_iter()
@@ -594,7 +624,7 @@ mod tests {
                 let mut selected = view(&history);
                 selected.incoming.ceiling = ceiling;
                 selected.outgoing.ceiling = ceiling;
-                let frame = super::render(selected, width, height);
+                let frame = super::render(selected, width, height, false);
                 let rows = decoded(&frame);
                 let graph_height = (height - 4) / 2;
                 for top in [3, 4 + graph_height] {
@@ -626,7 +656,7 @@ mod tests {
                 let mut selected = view(&history);
                 selected.incoming.ceiling = ceiling;
                 selected.outgoing.ceiling = ceiling;
-                let rows = decoded(&super::render(selected, width, height));
+                let rows = decoded(&super::render(selected, width, height, false));
                 let graph_height = (height - 4) / 2;
                 for top in [3, 4 + graph_height] {
                     let actual: String = rows[top..top + graph_height]
@@ -803,7 +833,7 @@ mod tests {
             ),
         ] {
             let width = if height < 24 { 60 } else { 80 };
-            let frame = super::render(view(&history), width, height);
+            let frame = super::render(view(&history), width, height, true);
             let rows = decoded(&frame);
             let outgoing_label = 3 + incoming.len();
             for (start, palette) in [(3, incoming), (outgoing_label + 1, outgoing)] {
@@ -1159,7 +1189,7 @@ mod tests {
             ] {
                 let rows = render(selected, width, height);
                 assert!(
-                    super::render(selected, width, height)
+                    super::render(selected, width, height, true)
                         .encoded_rows()
                         .iter()
                         .all(|row| !row.contains("38;5;"))

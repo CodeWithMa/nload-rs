@@ -268,6 +268,7 @@ impl Harness {
                 hook_calls,
             },
             |config| {
+                let color = config.color;
                 let mut session = Session::new(self.session.clone());
                 interactive(
                     config,
@@ -297,6 +298,7 @@ impl Harness {
                             &mut Runtime::new(effects),
                             deadline,
                             dimensions,
+                            color,
                         );
                         let view = monitor.selected_view();
                         self.view = Some(View {
@@ -458,7 +460,7 @@ fn observed_wire(selected: usize, width: usize, height: usize, rounds: usize) ->
     for _ in 0..selected {
         monitor.forward();
     }
-    let frame = screen::render(monitor.selected_view(), width, height);
+    let frame = screen::render(monitor.selected_view(), width, height, true);
     let mut expected = b"\x1b[0m\x1b[H\x1b[2J".to_vec();
     for (index, row) in frame.encoded_rows().iter().enumerate() {
         expected.extend_from_slice(format!("\x1b[{};1H", index + 1).as_bytes());
@@ -507,7 +509,7 @@ fn colored_backpressure_coalesces_navigation_and_resize_without_stale_frames_or_
     h.counters
         .rounds
         .push_back(Ok(snapshot(&[(b"a", 256), (b"b", 256), (b"c", 256)])));
-    assert_eq!(h.run(&args(&["-i", "1", "-o", "1"])), 0);
+    assert_eq!(h.run(&args(&["--color", "-i", "1", "-o", "1"])), 0);
     assert_eq!(
         h.effects.base.script.borrow().emitted,
         [old, observed_wire(1, 80, 24, 2)].concat()
@@ -589,7 +591,7 @@ fn handled_exits_after_every_colored_output_prefix_cancel_reset_and_restore() {
             let exit = cause.tick();
             let mut h = colored_harness(vec![output_tick(SAMPLE_NS, Some(Ok(split))), exit]);
             assert_eq!(
-                h.run(&args(&["-i", "1", "-o", "1"])),
+                h.run(&args(&["--color", "-i", "1", "-o", "1"])),
                 status,
                 "{cause:?}, split {split}"
             );
@@ -692,7 +694,11 @@ fn colored_runtime_faults_and_panics_restore_before_diagnostics_and_prior_hook_p
         if fault == Fault::AcquisitionPanic {
             h.counters.panic_at = Some(3);
         }
-        assert_eq!(h.run(&args(&["-i", "1", "-o", "1"])), 1, "{fault:?}");
+        assert_eq!(
+            h.run(&args(&["--color", "-i", "1", "-o", "1"])),
+            1,
+            "{fault:?}"
+        );
         assert_eq!(
             h.effects.base.script.borrow().emitted,
             old[..split],
@@ -749,7 +755,7 @@ fn colored_exit_cleanup_errors_and_panics_preserve_status_and_attempt_all_stages
                     .insert(operation, panics);
             }
             assert_eq!(
-                h.run(&args(&["-i", "1", "-o", "1"])),
+                h.run(&args(&["--color", "-i", "1", "-o", "1"])),
                 status,
                 "{cause:?}, cleanup panics={panics}"
             );

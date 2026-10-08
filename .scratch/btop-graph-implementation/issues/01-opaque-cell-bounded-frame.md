@@ -8,6 +8,8 @@ Authority: the [styled graph contract](../../btop-graph-spec/issues/04-screen-se
 
 **Status:** ready-for-agent
 
+**Assignee:** implementer-01 (OpenCode)
+
 - [ ] Screen construction owns an opaque frame with supplied logical dimensions and private rows. Its narrow read-only interface exposes dimensions and encoded rows; callers cannot construct frames from arbitrary strings, supply inconsistent dimensions, or access a generic public styled-cell builder.
 - [ ] Rendering builds exactly the supplied logical row count and terminal-cell width, including zero dimensions. Text placement and clipping operate on bounded cells, preserving existing geometry, status text, statistics formatting, escaped original-byte interface names, ellipsis, position reservation, and numeric overflow behavior.
 - [ ] Trailing blank cells are trimmed before encoding without changing logical dimensions. Encoded rows contain no LF/CR, arbitrary controls, or user-supplied escapes; screen emits no positioning, clearing, or session commands. Every emitted row starts and ends with an SGR reset, with a reset before the statistics area; final resets are never trimmed from serialized output.

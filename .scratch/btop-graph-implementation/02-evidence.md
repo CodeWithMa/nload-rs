@@ -217,5 +217,9 @@ All 22 screen tests and final gates passed: 115 unit + 16 debug PTY/decoder,
 release build and 16 release-artifact PTY tests. Fresh ordinary loopback smoke at
 both required sizes also passed. See [Review fixes — Standards and Spec evidence](review-fixes-evidence.md)
 for exact commands, red/green outcomes, normalized floating-point rationale,
-source/artifact identity and current human blockers. Earlier artifact hashes and
+source/artifact identity and then-pending human blockers. Earlier artifact hashes and
 test counts above retain their historical provenance.
+
+The later [ticket-04 completion assessment](04-evidence.md#current-acceptance-and-applicability--2026-10-08)
+resolves that human blocker. [Ticket 05 — final acceptance evidence](05-evidence.md)
+records current combined acceptance on the corrected source/artifact.

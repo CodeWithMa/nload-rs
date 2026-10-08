@@ -10,9 +10,11 @@ and its linked canonical contract. Local tracker operations follow
 
 `01 → 02 → {03, 04} → 05`
 
-Ticket 04's required human emulator observations are supplied and resolved;
-tickets 03 and 04 are closed. Ticket 05 covers the final combined acceptance and
-delivery handoff. Automated results do not substitute for human visual observations.
+**Status: complete — all five tickets closed, no acceptance blockers.** Required
+human emulator observations are supplied and resolved; final combined acceptance
+and delivery are recorded in the [verified styled graph handoff](handoff.md) and
+[final acceptance evidence](05-evidence.md). Automated results do not substitute
+for human visual observations.
 
 ## Decisions so far
 
@@ -20,6 +22,7 @@ delivery handoff. Automated results do not substitute for human visual observati
 - [Display paired Braille graph history with direction palettes](issues/02-paired-braille-direction-palettes.md#resolution--2026-10-08--implementer-02-opencode): exact right-aligned two-sample Braille fill and per-direction positional palettes now render through bounded frames; inherited statistics/history/support behavior, updated V01–V08 mappings, and debug/release Linux PTY gates pass.
 - [Verify styled output under backpressure and interrupted exits](issues/03-styled-output-backpressure-exits.md#resolution--2026-10-08--implementer-03-opencode): exhaustive colored-byte resumption, latest-state coalescing, sampling/shutdown fairness and staged fault/panic/cleanup status checks pass; 113 unit + 16 PTY/decoder tests and identified-release PTY gates establish protocol/OS evidence with explicit emulator limits.
 - [Record emulator appearance and nonprivileged live traffic](issues/04-emulator-live-traffic.md#resolution--2026-10-08--implementer-04-opencode): applicable corrected-artifact live/gate evidence and supplied Alacritty human observations at 60×16/80×24 complete T14/V05/D04, including small-history recovery and separate 0/130/143 visible restoration; unavailable configured font/client details and actual 56×17 small q size are recorded honestly.
+- [Complete styled-graph acceptance and delivery handoff](issues/05-acceptance-delivery-handoff.md#resolution--2026-10-08--implementer-05-opencode): final inherited/styled acceptance mappings, supersession and module/cost/dependency/license audits pass; 115 unit + 16 debug PTY/decoder and 16 release PTY/decoder checks, matching corrected artifact and applicable human/live evidence complete the verified 0.1.1 handoff with no blockers.
 
 ## Evidence
 
@@ -39,3 +42,11 @@ with their ticket resolutions. Unperformed checks remain pending.
   all seven completion mappings, corrected artifact/source applicability and
   retained 115-unit/16-PTY gates, with linked actual human report and scripted
   evidence for exact boundaries/uninducible states.
+- [Review fixes — corrected source, test-first regression and fresh live evidence](review-fixes-evidence.md):
+  rounding correction at `5e46611`, adjacent-f64 exact glyph coverage and corrected
+  artifact identity/live observations; then-pending human blocker resolved by 04.
+- [Ticket 05 — final styled graph acceptance evidence](05-evidence.md):
+  final fmt/locked-test/release-build/release-PTY gates, exact complete acceptance
+  matrix, compiler/environment/source/artifact applicability and delivery audit.
+- [Verified styled graph implementation handoff](handoff.md):
+  concise completed contract/source/artifact/evidence delivery, all tickets closed.

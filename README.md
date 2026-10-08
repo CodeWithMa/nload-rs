@@ -9,9 +9,11 @@ Inspired by [nload](https://github.com/rolandriegel/nload) by Roland Riegel.
 The application runs a single-interface view with incoming/outgoing colored
 Braille graphs, traffic statistics and arrow-key navigation through the startup
 interface list. Incoming uses indigo/lavender grades; outgoing uses magenta.
-The [styled graph implementation record](.scratch/btop-graph-implementation/implementation.md)
-links current deterministic and Linux PTY evidence and tracks the remaining
-styled-output and human emulator acceptance work. The earlier
+The [verified styled graph handoff](.scratch/btop-graph-implementation/handoff.md)
+links completed build, deterministic, Linux PTY, human emulator, live-traffic,
+and artifact acceptance for version 0.1.1. The
+[implementation record](.scratch/btop-graph-implementation/implementation.md)
+retains the ticket resolutions and evidence history. The earlier
 [verified Rust port handoff](.scratch/nload-rust-implementation/handoff.md)
 records historical ASCII-version acceptance.
 
@@ -21,7 +23,7 @@ Use stable Rust with edition 2024 support on Linux. `Cargo.toml` is the sole
 package-version authority; `Cargo.lock` records the selected dependency versions.
 The application was verified with rustc 1.98.1 and Cargo 1.98.0 on
 `x86_64-unknown-linux-gnu`. Exact toolchain details and check outcomes are recorded
-in the [implementation verification record](.scratch/nload-rust-implementation/verification.md).
+in the [final styled graph verification record](.scratch/btop-graph-implementation/05-evidence.md).
 
 From the repository root:
 
@@ -79,6 +81,17 @@ NLOAD_RS_PTY_BINARY=./target/release/nload-rs cargo test --locked --test linux_p
 
 The environment override is read only by the test harness. PTY protocol/state
 checks do not establish visible emulator behavior.
+
+Screen constructs opaque frames with their own dimensions, bounded terminal
+cells, Braille/palette encoding, and default-style row/statistics resets. Terminal
+owns default-style clearing, positioning, nonblocking byte-exact output, and
+staged restoration, including cancel/reset before showing the cursor and leaving
+the alternate screen. The
+[newer styled graph contract](.scratch/btop-graph-spec/spec.md#supersession-index)
+supersedes the historical ASCII thresholds, one-sample-per-cell presentation,
+ASCII-row interface, and affected output/restoration promises. Graph presentation
+is inspired by btop and implemented independently from standard Unicode/ANSI
+facts, without adding dependencies.
 
 ## Arch Linux installation
 

@@ -5,6 +5,15 @@ Review fixed range: `53f1ab7..a2214c6`.
 Worktree: `/tmp/opencode/nload-btop-review-fixes`.
 Branch: `implement/btop-review-fixes`.
 
+**Current applicability — 2026-10-08:** The source correction and corrected-artifact
+gates/live smoke below remain applicable. The later
+[human emulator observations](04-human-observations.md) and
+[ticket-04 completion assessment](04-evidence.md#current-acceptance-and-applicability--2026-10-08)
+resolved the then-pending human blocker. Final combined acceptance is recorded in
+[Ticket 05 — final acceptance evidence](05-evidence.md) and the
+[verified styled graph handoff](handoff.md). Pending-human statements in the dated
+review record below are historical, not current status.
+
 Authority: AGENTS.md, [local issue tracker guidance](../../docs/agents/issue-tracker.md),
 [domain guidance](../../docs/agents/domain.md), [Network Traffic Monitor glossary](../../GLOSSARY.md),
 the [styled graph specification handoff](../btop-graph-spec/spec.md) and its
@@ -208,7 +217,7 @@ Both smoke runs quit with q, **status 0**, empty stderr, saved termios and share
 file-status flags restored, exact CAN/reset/show/leave cleanup suffix present.
 Complete captured frame counts were 35 and 28; not sample-count oracles.
 
-## Closure audit and explicit blockers
+## Historical review closure audit and then-pending blockers
 
 The single implementer checked all supplied findings along the separate Standards
 and Spec axes above; this is a closure audit, not an independent delegated review.

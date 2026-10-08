@@ -41,6 +41,15 @@ uncommitted implementation delta is zero. The
 [final evidence](05-evidence.md#delivery-revision-and-integration-reconciliation)
 records committed revision/delta and integration reconciliation.
 
+Final review applies to integration revision
+**`4764d68858f7e14967309cb2c57f12216c7e163f`**, against fixed point `53f1ab7`.
+The subsequent review follow-up corrects two linked-title labels and records
+the review/applicability results only; executable inputs remain unchanged.
+[Final two-axis review](review-fixes-evidence.md#final-two-axis-review-and-documentation-follow-up--2026-10-08)
+records zero unresolved Standards or Spec findings and continued applicability
+of the completed acceptance evidence. This annotation does not replace the
+accepted delivery revision or claim a new tested artifact.
+
 Release artifact: `/tmp/opencode/nload-btop-05/target/release/nload-rs`.
 Also verified byte-identical to both permanent checkout artifacts:
 `/mnt/programming/rust/nload-rs/target/release/nload-rs` and

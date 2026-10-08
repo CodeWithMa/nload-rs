@@ -235,3 +235,51 @@ small-window history recovery and separate q/physical Ctrl+C/external SIGTERM
 visual restoration reports. [Complete styled-graph acceptance and delivery handoff](issues/05-acceptance-delivery-handoff.md)
 remains blocked on that human evidence. No prior live run or PTY stream is
 claimed as current human visual acceptance.
+
+## Final two-axis review and documentation follow-up — 2026-10-08
+
+The completed final review used fixed point **`53f1ab7`** and reviewed HEAD
+**`4764d68858f7e14967309cb2c57f12216c7e163f`**. This follow-up records that
+review's results and resolves its remaining documentation finding.
+
+### Standards
+
+All prior Standards findings are resolved: linked ticket titles, named
+exit/fault cases and shared baseline-monitor initialization. The final review
+found **one new minor finding in two hunks**, with **zero new heuristic findings**:
+`04-evidence.md` and `04-emulator-checklist.md` labelled their ticket-resolution
+links `ticket resolution`, contrary to
+[local issue tracker guidance](../../docs/agents/issue-tracker.md)'s linked-title
+rule. Both labels now read **Record emulator appearance and nonprivileged live
+traffic — resolution**, preserving the existing resolution targets.
+**Standards: zero unresolved findings after this correction.**
+
+### Spec
+
+**Spec: zero unresolved findings.** Both P2 findings are fixed; all **52**
+A/S/V/T/D acceptance cases are mapped in
+[final acceptance evidence](05-evidence.md#acceptance-matrix). The supplied
+[human emulator observations](04-human-observations.md) apply to the corrected
+artifact, as assessed in [current acceptance and applicability](04-evidence.md#current-acceptance-and-applicability--2026-10-08).
+[Record emulator appearance and nonprivileged live traffic](issues/04-emulator-live-traffic.md)
+and [Complete styled-graph acceptance and delivery handoff](issues/05-acceptance-delivery-handoff.md)
+are closed. The then-pending blockers in the historical section above are
+resolved; **no acceptance blocker remains**.
+
+### Revision applicability and documentation checks
+
+Resumed the requested branch with clean status, then fast-forwarded integration
+**before editing** from `74792c5` to the full reviewed HEAD above. Integration
+ancestry passed. This follow-up changes only the two link labels, this review
+record and the handoff's applicability annotation. The diff from reviewed HEAD
+for `src`, `tests`, `Cargo.toml` and `Cargo.lock` is empty; existing final gates,
+release/live evidence and human artifact applicability remain valid. No Cargo,
+PTY or live gates need rerunning for this documentation-only delta.
+
+Checked the linked ticket's actual title and resolution anchor, the two corrected
+labels, the complete intended diff and whitespace with `git diff --check`.
+Inspected status and recent commits before staging only the intended documentation.
+Latest integration reconciliation returned `Already up to date.` at `4764d68`;
+the integration ancestry check passed.
+The reviewed/delivery revisions above identify existing commits; this follow-up
+does not assert its own future commit hash as the tested source or artifact.

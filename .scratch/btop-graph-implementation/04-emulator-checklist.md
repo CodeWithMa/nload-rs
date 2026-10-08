@@ -4,7 +4,7 @@
 [actual report and follow-up](04-human-observations.md) complete the T14,
 V05-emulator and ordinary-emulator D04 observations; see
 [current evidence mappings](04-evidence.md#current-acceptance-and-applicability--2026-10-08)
-and the [ticket resolution](issues/04-emulator-live-traffic.md#resolution--2026-10-08--implementer-04-opencode).
+and the [Record emulator appearance and nonprivileged live traffic — resolution](issues/04-emulator-live-traffic.md#resolution--2026-10-08--implementer-04-opencode).
 The procedure remains runnable for repeat checks, using the
 [reusable report template](04-human-report-template.md). Its prescribed actions
 and expected statuses are instructions, not additional observations.

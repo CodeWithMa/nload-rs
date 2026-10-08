@@ -7,7 +7,7 @@ Recorded 2026-10-08 by implementer-04 (OpenCode), worktree
 [supplied human observations](04-human-observations.md), including the follow-up
 **“All observed; font unknown”**, complete T14, V05-emulator and D04 on the
 corrected artifact. See [current acceptance and applicability](#current-acceptance-and-applicability--2026-10-08)
-and the [ticket resolution](issues/04-emulator-live-traffic.md#resolution--2026-10-08--implementer-04-opencode).
+and the [Record emulator appearance and nonprivileged live traffic — resolution](issues/04-emulator-live-traffic.md#resolution--2026-10-08--implementer-04-opencode).
 Configured font/fallback details, client OS and theme name are unavailable, not
 invented; actual clean single-cell Braille and default-style contrast/restoration
 were confirmed. No unresolved ticket-04 blocker remains.

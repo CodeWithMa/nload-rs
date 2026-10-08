@@ -541,16 +541,30 @@ fn colored_product() -> Product {
 
 #[test]
 fn colored_normal_signal_and_runtime_eof_exits_restore_os_state_and_protocol() {
-    for cause in 0..6 {
+    enum Exit {
+        Typed(&'static [u8]),
+        Signal(libc::c_int),
+        InputEof,
+    }
+    for (name, cause, status, diagnostic) in [
+        ("q", Exit::Typed(b"q"), 0, None),
+        ("Q", Exit::Typed(b"Q"), 0, None),
+        ("typed Ctrl+C", Exit::Typed(b"\x03"), 130, None),
+        ("SIGINT", Exit::Signal(libc::SIGINT), 130, None),
+        ("SIGTERM", Exit::Signal(libc::SIGTERM), 143, None),
+        (
+            "input EOF",
+            Exit::InputEof,
+            1,
+            Some("terminal input closed"),
+        ),
+    ] {
         let mut product = colored_product();
         assert_raw(&product);
         match cause {
-            0 => product.send(b"q"),
-            1 => product.send(b"Q"),
-            2 => product.send(b"\x03"),
-            3 => product.signal(libc::SIGINT),
-            4 => product.signal(libc::SIGTERM),
-            _ => {
+            Exit::Typed(bytes) => product.send(bytes),
+            Exit::Signal(signal) => product.signal(signal),
+            Exit::InputEof => {
                 let canonical = product.input.saved_mode;
                 // SAFETY: real retained input terminal and initialized termios.
                 checked(unsafe {
@@ -559,11 +573,11 @@ fn colored_normal_signal_and_runtime_eof_exits_restore_os_state_and_protocol() {
                 product.send(&[canonical.c_cc[libc::VEOF]]);
             }
         }
-        let stderr = product.finish([0, 0, 130, 130, 143, 1][cause], true);
-        if cause == 5 {
-            assert!(stderr.contains("terminal input closed"));
+        let stderr = product.finish(status, true);
+        if let Some(expected) = diagnostic {
+            assert!(stderr.contains(expected), "{name}: {stderr}");
         } else {
-            assert!(stderr.is_empty(), "{stderr}");
+            assert!(stderr.is_empty(), "{name}: {stderr}");
         }
         product.assert_cleanup();
     }

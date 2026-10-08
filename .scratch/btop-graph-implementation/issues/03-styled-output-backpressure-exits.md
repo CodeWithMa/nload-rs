@@ -6,15 +6,35 @@ Authority: the [styled graph contract](../../btop-graph-spec/issues/04-screen-se
 
 **Blocked by:** [02: Display paired Braille graph history with direction palettes](02-paired-braille-direction-palettes.md).
 
-**Status:** ready-for-agent
+**Status:** closed
 
 **Assignee:** implementer-03 (OpenCode)
 
-- [ ] Deterministic partial-output fixtures use actual screen-constructed colored Braille frames. Split writes inside multibyte glyphs and every relevant foreground/reset SGR fragment, including interrupted/would-block outcomes, and compare exact resumed bytes without duplicate prefixes, lost suffixes, malformed glyphs, or interleaved frames.
-- [ ] Verify only an untouched pending frame can be replaced. Once any byte is emitted, finish that frame before rendering the latest requested view. Navigation/resize requests coalesce to the latest state rather than creating a stale frame queue.
-- [ ] Application-loop fixtures demonstrate ongoing input, signals, and observation-driven sampling under colored-output backpressure and sustained input/resize batches. Preserve bounded output batches, shutdown priority, due-acquisition ordering, and zero redraw-induced samples.
-- [ ] Verify cancel/reset before cursor-show/alternate-screen-leave on q/Q, typed Ctrl+C, SIGINT, SIGTERM, applicable partial-initialization failures, runtime input/output/clock faults, caught initialization/runtime panics, and Drop fallback. Restore saved termios and changed file flags; diagnostic reporting follows restoration attempts and prior panic-hook restoration.
-- [ ] Inject reset and other cleanup failures, including multiple failures, partial writes, interruptions, and restoration panics. Every applicable restoration is attempted, cleanup remains bounded and nonpanicking, cleanup-only failure changes successful quit to status 1, and previously selected 130/143/1 statuses remain unchanged.
-- [ ] Real compiled-binary Linux PTY checks cover UTF-8/permitted-SGR frame bounds, normal/signal exits, resize/small-terminal operation, backpressure, and practical initialization/runtime faults. Confirm saved OS state and observable cleanup ordering; do not count PTY bytes as visible palette/font evidence.
-- [ ] Record exact automated case-to-test mappings and actual outcomes for affected T01/T07–T13 and V05 coverage. Identify failures a real PTY cannot reliably induce and link their deterministic/scripted evidence. Best-effort cleanup with unwritable output is not reported as proof the reset reached an emulator.
-- [ ] Run and record `cargo fmt --check`, `cargo test --locked`, and `cargo build --release --locked`; exercise the release executable through the Linux PTY harness and identify the tested revision/artifact. Concrete failures are resolved or remain explicit open blockers rather than being recorded as passes.
+- [x] Deterministic partial-output fixtures use actual screen-constructed colored Braille frames. Split writes inside multibyte glyphs and every relevant foreground/reset SGR fragment, including interrupted/would-block outcomes, and compare exact resumed bytes without duplicate prefixes, lost suffixes, malformed glyphs, or interleaved frames.
+- [x] Verify only an untouched pending frame can be replaced. Once any byte is emitted, finish that frame before rendering the latest requested view. Navigation/resize requests coalesce to the latest state rather than creating a stale frame queue.
+- [x] Application-loop fixtures demonstrate ongoing input, signals, and observation-driven sampling under colored-output backpressure and sustained input/resize batches. Preserve bounded output batches, shutdown priority, due-acquisition ordering, and zero redraw-induced samples.
+- [x] Verify cancel/reset before cursor-show/alternate-screen-leave on q/Q, typed Ctrl+C, SIGINT, SIGTERM, applicable partial-initialization failures, runtime input/output/clock faults, caught initialization/runtime panics, and Drop fallback. Restore saved termios and changed file flags; diagnostic reporting follows restoration attempts and prior panic-hook restoration.
+- [x] Inject reset and other cleanup failures, including multiple failures, partial writes, interruptions, and restoration panics. Every applicable restoration is attempted, cleanup remains bounded and nonpanicking, cleanup-only failure changes successful quit to status 1, and previously selected 130/143/1 statuses remain unchanged.
+- [x] Real compiled-binary Linux PTY checks cover UTF-8/permitted-SGR frame bounds, normal/signal exits, resize/small-terminal operation, backpressure, and practical initialization/runtime faults. Confirm saved OS state and observable cleanup ordering; do not count PTY bytes as visible palette/font evidence.
+- [x] Record exact automated case-to-test mappings and actual outcomes for affected T01/T07–T13 and V05 coverage. Identify failures a real PTY cannot reliably induce and link their deterministic/scripted evidence. Best-effort cleanup with unwritable output is not reported as proof the reset reached an emulator.
+- [x] Run and record `cargo fmt --check`, `cargo test --locked`, and `cargo build --release --locked`; exercise the release executable through the Linux PTY harness and identify the tested revision/artifact. Concrete failures are resolved or remain explicit open blockers rather than being recorded as passes.
+
+## Comments
+
+### Resolution — 2026-10-08 — implementer-03 (OpenCode)
+
+All eight criteria passed. Source commit `81797393a2dbbf56a614ede88e3cf41ef9c77d05`
+adds exhaustive colored-byte transport and interrupted-exit fixtures, complete
+application-loop coalescing/fairness/fault/hook-order checks, single/multiple staged
+cleanup error/panic and partial-setup/cleanup matrices, and colored Linux PTY
+recovery/exit/fault coverage. No production defect was found requiring a fix;
+temporary sensitivity mutations were observed red and reverted before gates.
+
+[Ticket 03 — styled transport, backpressure and exits evidence](../03-evidence.md)
+records exact affected T01/T07–T13/V05 test mappings, limitations, integration
+ancestry and the identified release artifact. Formatting, locked tests (113 unit
++ 16 PTY/decoder), release build and all 16 release-artifact PTY tests passed.
+Saved OS state, cancel/reset-before-show/leave attempts and status arbitration
+pass; unwritable output is explicitly best-effort, not visible reset evidence.
+No blocker remains for this ticket. Human emulator/live acceptance belongs to
+ticket 04.

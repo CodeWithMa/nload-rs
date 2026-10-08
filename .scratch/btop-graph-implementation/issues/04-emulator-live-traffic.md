@@ -8,6 +8,8 @@ Authority: the [styled graph contract](../../btop-graph-spec/issues/04-screen-se
 
 **Status:** ready-for-agent
 
+**Assignee:** implementer-04 (OpenCode); human observations required
+
 - [ ] Prepare a precise checklist for the direct release executable using actually discovered interface names, separate incoming/outgoing ceiling overrides, and nonprivileged ordinary generated traffic. Identify the source revision and tested release artifact so observations can be checked for applicability later.
 - [ ] Record emulator identity/version where obtainable, font/Braille coverage, UTF-8 and 256-color setup, TERM declaration, dimensions, traffic setup, actions, and actual observations. Do not infer visual success from environment declarations, prototype screenshots, or PTY streams.
 - [ ] At both 60×16 and 80×24, observe stacked directions and both positional palettes, medium-dark bottom/pale top contrast, legible default-style statistics/labels, and correct independent ceiling labels. Observe true-blank measured zeros and empty states; use clearly identified practical scripted evidence for states live traffic cannot reliably induce.

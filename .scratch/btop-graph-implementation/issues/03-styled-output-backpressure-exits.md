@@ -8,6 +8,8 @@ Authority: the [styled graph contract](../../btop-graph-spec/issues/04-screen-se
 
 **Status:** ready-for-agent
 
+**Assignee:** implementer-03 (OpenCode)
+
 - [ ] Deterministic partial-output fixtures use actual screen-constructed colored Braille frames. Split writes inside multibyte glyphs and every relevant foreground/reset SGR fragment, including interrupted/would-block outcomes, and compare exact resumed bytes without duplicate prefixes, lost suffixes, malformed glyphs, or interleaved frames.
 - [ ] Verify only an untouched pending frame can be replaced. Once any byte is emitted, finish that frame before rendering the latest requested view. Navigation/resize requests coalesce to the latest state rather than creating a stale frame queue.
 - [ ] Application-loop fixtures demonstrate ongoing input, signals, and observation-driven sampling under colored-output backpressure and sustained input/resize batches. Preserve bounded output batches, shutdown priority, due-acquisition ordering, and zero redraw-induced samples.

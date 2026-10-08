@@ -8,6 +8,8 @@ Authority: the [styled graph contract](../../btop-graph-spec/issues/04-screen-se
 
 **Status:** ready-for-agent
 
+**Assignee:** implementer-02 (OpenCode)
+
 - [ ] For graph width W, render the newest at most 2W retained samples chronologically in right-aligned half-cell positions. Older is left and newer is right; the newest occupies the right half of the rightmost cell. One/odd counts leave the unmatched oldest sample's left half blank; no sample is duplicated or manufactured. Genuine zero samples consume real positions.
 - [ ] For each unrounded rate r, positive direction-specific ceiling c, and height H, normalize by clamping r/c to [0,1] and use D = floor(f × 4H + 0.5), bounded to [0,4H]. Fill each half-cell independently bottom-up, using exact nearest-dot halfway-up decisions without fuzzy tolerance or a forced minimum dot. At/above ceiling saturates only that sample, and numeric rates remain uncapped.
 - [ ] Independently implement standard Unicode Braille dot numbering (left top-to-bottom 1,2,3,7; right 4,5,6,8). A zero mask is ASCII space, never U+2800. Full left-only, right-only, and both-half glyphs are exactly `⡇`, `⢸`, and `⣿`.

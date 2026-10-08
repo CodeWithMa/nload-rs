@@ -45,3 +45,20 @@ for red/green execution, exact case/test mappings, compiler/environment, artifac
 SHA-256 and review. No ticket-02 blockers remain. Tickets 03/04 now have their
 colored frame implementation prerequisite; their dedicated transport/visual/live
 verification and ticket 05's final combined acceptance remain open.
+
+### Review correctness follow-up — 2026-10-08 — review-fixes implementer (OpenCode)
+
+Fixed the reviewed P2 additive-rounding defect in source commit
+`5e4661164f7afda85c266b2a45ce730276c71bad`. A meaningful frame-interface test
+failed on the default H=10 first-step predecessor before the fix and passed
+afterward. Adjacent-f64 first/higher-half-step cases at H=6/H=10 and intermediate
+normalization ties now have exact whole-column oracles in both directions.
+Positive `round()` implements halfway-up without additive promotion; normalized
+rate operation order is retained and no fuzzy tolerance is used.
+
+The ticket remains **closed: correctness finding fixed**. Full gates passed
+(115 unit + 16 debug PTY/decoder, release build and 16 release-binary PTYs),
+with fresh ordinary loopback smoke at both required sizes. See
+[Review fixes — Standards and Spec evidence](../review-fixes-evidence.md) and the
+[paired Braille evidence follow-up](../02-evidence.md#review-correctness-follow-up--2026-10-08)
+for exact mappings, artifact identity and remaining human acceptance blockers.

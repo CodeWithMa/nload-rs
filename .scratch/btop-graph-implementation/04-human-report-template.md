@@ -7,9 +7,20 @@ Keep q, typed Ctrl+C and external SIGTERM reports separate. See
 
 ## Identity and setup
 
+Current target: permanent `/mnt/programming/rust/nload-rs` integration checkout,
+direct `target/btop-review-fixes/release/nload-rs` artifact built from
+`5e4661164f7afda85c266b2a45ce730276c71bad` (`implement/btop-review-fixes`),
+SHA-256 `d39b77045a2c09ac8aebac41d1a5ef3ca4593d806f90fa3a888578dd7c8b49d7`.
+Record actual checkout HEAD and source delta: integration was still `a2214c6`
+when the corrected executable was built in the separate review worktree.
+Graph rounding changed; the old `50d9a750…` artifact's live smoke does not
+validate this one. Fresh agent checks are linked in the checklist; **all human
+fields below remain pending**, including separate handled exits.
+
 - Date / observer:
 - Worktree / branch / HEAD:
-- Executable source delta (`git diff 48584d0 -- src tests Cargo.toml Cargo.lock`):
+- Executable path / tested artifact source revision:
+- Checkout source delta (`git diff 5e4661164f7afda85c266b2a45ce730276c71bad -- src tests Cargo.toml Cargo.lock`):
 - Build result / version / SHA-256:
 - Emulator name / version / client OS:
 - Font / size / fallback / Braille probe and actual graph glyph appearance:

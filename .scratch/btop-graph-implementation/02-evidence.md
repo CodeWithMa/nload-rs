@@ -151,7 +151,7 @@ font quality or emulator appearance.
 
 The inherited deterministic application/runtime/session tests also all passed.
 Expanded every-byte **colored** resumption, scripted fault/panic coverage and
-their detailed T08–T13 audit belong to [ticket 03](issues/03-styled-output-backpressure-exits.md);
+their detailed T08–T13 audit belong to [Verify styled output under backpressure and interrupted exits](issues/03-styled-output-backpressure-exits.md);
 this record does not claim that later verification ticket is complete.
 
 ## Criterion / implementation review
@@ -189,5 +189,33 @@ recent log were inspected before staging intended files.
 
 No blocker remains for ticket 02. Human palette/font/statistics-contrast and
 handled-exit visual observations, plus the dedicated live-smoke record, remain
-assigned to [ticket 04](issues/04-emulator-live-traffic.md). Final combined
-acceptance/handoff remains [ticket 05](issues/05-acceptance-delivery-handoff.md).
+assigned to [Record emulator appearance and nonprivileged live traffic](issues/04-emulator-live-traffic.md). Final combined
+acceptance/handoff remains [Complete styled-graph acceptance and delivery handoff](issues/05-acceptance-delivery-handoff.md).
+
+## Review correctness follow-up — 2026-10-08
+
+The preceding gates/artifact describe the original implementation. Review of
+`53f1ab7..a2214c6` found that adding 0.5 before flooring could promote the f64
+immediately below a half step. Source correction
+`5e4661164f7afda85c266b2a45ce730276c71bad` uses positive `round()` after the
+prescribed normalization and scaling, without additive promotion or tolerance.
+The closed correctness ticket remains closed with this defect fixed.
+
+Additional exact V02 frame-interface mappings:
+
+- `screen::tests::adjacent_rates_at_half_steps_do_not_gain_a_dot_from_additive_rounding`:
+  adjacent f64 below/at/above first, second, fifth and twentieth half steps,
+  both directions at H=10/default c=1310720 and H=6/c=128; literal whole-column
+  Unicode oracles. The reviewed first-threshold predecessor failed before the
+  fix and passed afterward.
+- `screen::tests::intermediate_normalization_ties_use_the_normalized_rate_not_a_rate_threshold`:
+  adjacent inputs that normalize/scale onto the same halfway decision at H=6
+  (including the default ceiling's first step) and H=10. Preserves `r/c` then
+  multiplication, rather than replacing it with a rate-threshold algorithm.
+
+All 22 screen tests and final gates passed: 115 unit + 16 debug PTY/decoder,
+release build and 16 release-artifact PTY tests. Fresh ordinary loopback smoke at
+both required sizes also passed. See [Review fixes — Standards and Spec evidence](review-fixes-evidence.md)
+for exact commands, red/green outcomes, normalized floating-point rationale,
+source/artifact identity and current human blockers. Earlier artifact hashes and
+test counts above retain their historical provenance.

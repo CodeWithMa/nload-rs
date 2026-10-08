@@ -24,6 +24,7 @@ Authority: the [styled graph contract](../../btop-graph-spec/issues/04-screen-se
 - [04 emulator checklist — exact dimensions, separate ceilings and exit commands](../04-emulator-checklist.md)
 - [04 human report template — no observations supplied yet](../04-human-report-template.md)
 - [04 live-smoke transcript — actual agent traffic-source output](../04-live-smoke.txt)
+- [Review fixes — Standards and Spec evidence, corrected artifact and fresh live smoke](../review-fixes-evidence.md)
 
 ## Comments
 
@@ -62,3 +63,21 @@ intended ticket-04 files. All new assets are under this implementation effort.
 Full staged diff review and `git diff --cached --check` passed.
 The checked-in scope is documentation/evidence/tracker metadata; no executable
 delta invalidates the recorded gates/artifact. Human evidence remains pending.
+
+### Review applicability follow-up — 2026-10-08 — review-fixes implementer (OpenCode)
+
+The graph correction at `5e4661164f7afda85c266b2a45ce730276c71bad` changes the
+release artifact. Earlier ticket-04 source/hash/live results retain historical
+provenance; fresh corrected-artifact fmt/locked tests/release build and all 16
+release PTYs passed. Ordinary nonprivileged UDP smoke was rerun at 60×16/80×24
+with independent 2/4 MBit/s labels, discovered selection/all-arrow navigation,
+advancing totals, colored graphs/all twelve indices, zero idle and clean q/OS
+restoration. See the linked review evidence and appended evidence follow-up.
+
+The runnable checklist and blank human report now use the permanent integration
+checkout `/mnt/programming/rust/nload-rs` and durable corrected executable
+`target/btop-review-fixes/release/nload-rs`, identifying its source separately
+from integration HEAD. The disposable ticket-04 worktree is no longer required.
+**Human T14, V05-emulator and ordinary-emulator D04 remain mandatory and pending.**
+Status stays **blocked / awaiting-human**; final delivery is blocked by these
+observations. No agent PTY or live result is counted as a visual report.

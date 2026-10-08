@@ -1,9 +1,20 @@
 # Ticket 04 — runnable styled-graph emulator checklist
 
-**Not performed by a human yet.** This procedure supplies the pending T14,
-V05-emulator and ordinary-emulator D04 observations. Return factual results using
-[the report template](04-human-report-template.md). A skipped/unclear item stays
-pending; a screenshot or PTY trace alone does not establish all observations.
+**Completed — human observations recorded.** The
+[actual report and follow-up](04-human-observations.md) complete the T14,
+V05-emulator and ordinary-emulator D04 observations; see
+[current evidence mappings](04-evidence.md#current-acceptance-and-applicability--2026-10-08)
+and the [ticket resolution](issues/04-emulator-live-traffic.md#resolution--2026-10-08--implementer-04-opencode).
+The procedure remains runnable for repeat checks, using the
+[reusable report template](04-human-report-template.md). Its prescribed actions
+and expected statuses are instructions, not additional observations.
+
+Recorded full sizes were 60×16 and 80×24. Run A's actual small q size was **56×17**,
+substituting for the suggested 59×16; Run C's below-floor startup/growth was
+confirmed without an exact small-size transcript. Exact 59×16/60×15 boundaries
+use the automated evidence mapped in §5 and the completion record. Configured
+font/client OS/theme name were unavailable; clean single-cell Braille and the
+listed color/text/idle/history/exit behaviors were explicitly confirmed.
 
 ## 1. Identify the tested source, executable and emulator
 
@@ -34,18 +45,20 @@ stty size
 The agent's tested source is `5e4661164f7afda85c266b2a45ce730276c71bad`
 (`implement/btop-review-fixes`); version `nload-rs 0.1.1`; artifact SHA-256
 `d39b77045a2c09ac8aebac41d1a5ef3ca4593d806f90fa3a888578dd7c8b49d7`.
-The integration checkout was still at `a2214c6` when this artifact was built from
-the review-fix worktree. You can run the durable corrected executable directly
-there and record the checkout/source delta. Once integration contains the fix
-and the executable-source diff above is empty, rebuild if needed with:
+Integration now contains the correction. The human report identified checkout
+`3765b31` with an empty executable-source diff from the reviewed source and this
+artifact hash. Closure review at integration `2ee6d8d` found the same source inputs;
+both `target/release/nload-rs` and `target/btop-review-fixes/release/nload-rs` had
+the hash above and passed a byte comparison. Commands below retain the durable
+path actually identified in the human report. For a repeat run, record source
+and artifact identity first; rebuild if needed with:
 
 ```sh
 cargo build --release --locked --target-dir target/btop-review-fixes
 sha256sum ./target/btop-review-fixes/release/nload-rs
 ```
 
-Building from the older integration source would replace the corrected artifact
-with the pre-fix program. The original ticket-04 source `48584d0`, artifact
+The original ticket-04 source `48584d0`, artifact
 `50d9a750…`, and temporary worktree in [historical live evidence](04-evidence.md)
 are provenance, not current corrected-artifact validation. Fresh agent release,
 PTY and live checks are in [Review fixes — Standards and Spec evidence](review-fixes-evidence.md).
@@ -232,7 +245,14 @@ The first covers baseline/absent/read-failed/idle/recovery/decreased counters an
 exact placeholders/totals/blank graphs. The next two cover true ASCII-space zeros,
 idle retaining older traffic and exact odd/even half-cell placement. The last two
 cover retained history and small-period sampling/navigation without render mutation.
-All passed in the agent's full gates. Cite actual live observations where seen,
-and these fixtures for uninducible/too-brief states. Return failures or ambiguous
-items explicitly; the ticket remains blocked until required human evidence is
-supplied and any concrete failure is resolved.
+All passed in the corrected-source gates recorded in
+[review-fixes evidence](review-fixes-evidence.md#actual-gates-on-corrected-sourceartifact).
+Exact 59×16/60×15 boundary behavior also passed
+`screen::tests::small_and_zero_dimensions_show_only_bounded_warning_selection_status`
+and Linux PTY `small_startup_resize_sampling_navigation_and_quit_keep_bounded_rows`.
+The completed human run supplies the visual below-floor behavior at actual 56×17
+and during Run C's small startup/growth; exact half-cell arithmetic and
+uninducible states remain clearly scripted evidence. For repeat checks, cite what
+was actually seen and return any failures, skipped actions or ambiguous items.
+Ticket 04's supplied report has been resolved; no human observation remains
+pending for its closure.

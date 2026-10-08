@@ -4,29 +4,33 @@
 
 Authority: the [styled graph contract](../../btop-graph-spec/issues/04-screen-seam-contract.md#acceptance-and-test-migration), especially T14 and emulator aspects of V05, and D04/live-evidence rules in the [minimal Rust port specification](../../nload-rust-port/spec.md).
 
-**Blocked by:** Human emulator observations (not yet supplied). [02: Display paired Braille graph history with direction palettes](02-paired-braille-direction-palettes.md) is closed; its implementation prerequisite is satisfied. Ticket 03 does not gate collecting these observations.
+**Blocked by:** None. [02: Display paired Braille graph history with direction palettes](02-paired-braille-direction-palettes.md) is closed; mandatory human observations are supplied and resolved.
 
-**Status:** blocked / awaiting-human
+**Status:** closed
 
-**Assignee:** implementer-04 (OpenCode); human observations required
+**Assignee:** implementer-04 (OpenCode)
 
 - [x] Prepare a precise checklist for the direct release executable using actually discovered interface names, separate incoming/outgoing ceiling overrides, and nonprivileged ordinary generated traffic. Identify the source revision and tested release artifact so observations can be checked for applicability later.
-- [ ] Record emulator identity/version where obtainable, font/Braille coverage, UTF-8 and 256-color setup, TERM declaration, dimensions, traffic setup, actions, and actual observations. Do not infer visual success from environment declarations, prototype screenshots, or PTY streams.
-- [ ] At both 60×16 and 80×24, observe stacked directions and both positional palettes, medium-dark bottom/pale top contrast, legible default-style statistics/labels, and correct independent ceiling labels. Observe true-blank measured zeros and empty states; use clearly identified practical scripted evidence for states live traffic cannot reliably induce.
-- [ ] Observe prompt arrow-key selection, small-terminal startup and shrink/grow, continued sampling/navigation while small, and retained half-cell history recovery on growth. Confirm small-terminal text stays default styled.
-- [ ] In separate q, typed Ctrl+C, and external SIGTERM runs, record statuses 0/130/143 plus visible cursor, default styling, normal shell interaction, and prior-screen return after each handled exit.
-- [ ] Run or guide nonprivileged live Linux discovery/selection/navigation and ordinary traffic on a monitored interface. Record advancing cumulative totals and rate/graph activity with independent ceilings; do not use exact live rates as a numerical oracle or require privileged interface lifecycle changes.
-- [ ] Link the actual observations and map them to T14, V05 emulator coverage, and D04. Fix or record concrete failures and keep unperformed/unclear observations pending; this ticket is complete only when required human observations have been supplied and resolved.
+- [x] Record emulator identity/version where obtainable, font/Braille coverage, UTF-8 and 256-color setup, TERM declaration, dimensions, traffic setup, actions, and actual observations. Do not infer visual success from environment declarations, prototype screenshots, or PTY streams.
+- [x] At both 60×16 and 80×24, observe stacked directions and both positional palettes, medium-dark bottom/pale top contrast, legible default-style statistics/labels, and correct independent ceiling labels. Observe true-blank measured zeros and empty states; use clearly identified practical scripted evidence for states live traffic cannot reliably induce.
+- [x] Observe prompt arrow-key selection, small-terminal startup and shrink/grow, continued sampling/navigation while small, and retained half-cell history recovery on growth. Confirm small-terminal text stays default styled.
+- [x] In separate q, typed Ctrl+C, and external SIGTERM runs, record statuses 0/130/143 plus visible cursor, default styling, normal shell interaction, and prior-screen return after each handled exit.
+- [x] Run or guide nonprivileged live Linux discovery/selection/navigation and ordinary traffic on a monitored interface. Record advancing cumulative totals and rate/graph activity with independent ceilings; do not use exact live rates as a numerical oracle or require privileged interface lifecycle changes.
+- [x] Link the actual observations and map them to T14, V05 emulator coverage, and D04. Fix or record concrete failures and keep unperformed/unclear observations pending; this ticket is complete only when required human observations have been supplied and resolved.
 
 ## Assets
 
-- [04 evidence — build, ancestry, actual live rates/totals, applicability and pending cases](../04-evidence.md)
+- [04 evidence — current completion mappings and historical build/live preparation](../04-evidence.md)
 - [04 emulator checklist — exact dimensions, separate ceilings and exit commands](../04-emulator-checklist.md)
-- [04 human report template — no observations supplied yet](../04-human-report-template.md)
-- [04 live-smoke transcript — actual agent traffic-source output](../04-live-smoke.txt)
+- [04 human report template — reusable prompts for repeat runs](../04-human-report-template.md)
+- [Human emulator observations — actual report and “All observed; font unknown” follow-up](../04-human-observations.md)
+- [04 live-smoke transcript — historical pre-correction agent traffic-source output](../04-live-smoke.txt)
 - [Review fixes — Standards and Spec evidence, corrected artifact and fresh live smoke](../review-fixes-evidence.md)
 
 ## Comments
+
+Comments preceding the resolution record historical preparation and then-pending
+human evidence. Their pending statuses are superseded by the resolution below.
 
 ### Independent work and human blocker — 2026-10-08 — implementer-04 (OpenCode)
 
@@ -81,3 +85,47 @@ from integration HEAD. The disposable ticket-04 worktree is no longer required.
 **Human T14, V05-emulator and ordinary-emulator D04 remain mandatory and pending.**
 Status stays **blocked / awaiting-human**; final delivery is blocked by these
 observations. No agent PTY or live result is counted as a visual report.
+
+### Resolution — 2026-10-08 — implementer-04 (OpenCode)
+
+All seven criteria are satisfied. Resumed on clean `implement/btop-04` at
+`282dc3b`, merging integration **before work** to `2ee6d8d` (fast-forward). Read
+the durable [Human emulator observations](../04-human-observations.md) and explicit
+**“All observed; font unknown”** follow-up. The report applies to corrected source
+`5e4661164f7afda85c266b2a45ce730276c71bad`, identified at human checkout `3765b31`
+with an empty executable-source diff and artifact SHA-256
+`d39b77045a2c09ac8aebac41d1a5ef3ca4593d806f90fa3a888578dd7c8b49d7`.
+Closure checks confirmed no executable-source delta on this branch, matching
+hashes and byte identity of the permanent normal and review release executables.
+
+Alacritty 0.17.0 human observations at **60×16 and 80×24** confirm both positional
+palettes, legible bottom/pale top shades, clean single-cell Braille, default-style
+text/statistics, independent ceilings, true-blank idle positions, prompt navigation,
+small-window sampling/history recovery and separate handled exits. Actual q,
+physical Ctrl+C and external SIGTERM child statuses are **0/130/143**; the
+follow-up confirms visible cursor, default foreground/background, normal shell
+interaction and prior-screen return **after every exit**.
+
+Run A's actual small q size was **56×17**, a valid below-width-floor substitute
+for the suggested 59×16. Run C's small startup/growth is confirmed without an
+exact small-size transcript. Exact 59×16/60×15 boundaries, half-cell arithmetic
+and baseline/absent/read-failed/recovery states use explicitly mapped passing
+deterministic/PTY fixtures, not invented human observations. Configured font,
+client OS/theme name are unavailable; actual glyph coverage and appearance were
+confirmed. Human traffic comparisons are qualitative; actual corrected-artifact
+rate/total checkpoints and proc deltas are linked in the review live-smoke record.
+
+See [current acceptance and applicability](../04-evidence.md#current-acceptance-and-applicability--2026-10-08)
+for all criterion/T14/V05/D04 mappings and evidence limits. Corrected fmt/locked
+test/release-build gates (**115 unit + 16 PTY/decoder**, **16 release PTYs**) remain
+valid on the same artifact. Closure changes are documentation only; the already
+loaded `tdd` guidance requires no new implementation cycle or repeated gates.
+No unresolved ticket-04 failures or human-evidence blockers remain. **Ticket 04
+is closed.**
+
+Closure documentation review: inspected status/full diff/recent ten commits;
+`git diff --check` passed, and evidence links/resolution anchors plus named
+boundary fixtures were checked. Latest pre-commit integration merge returned
+`Already up to date.` at `2ee6d8d`; its ancestry check passed. The intended
+closure files are this ticket, 04-evidence/checklist/template and the
+implementation record's named resolution/evidence pointers.

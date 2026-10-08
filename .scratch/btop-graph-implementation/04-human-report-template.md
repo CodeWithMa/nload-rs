@@ -1,7 +1,11 @@
 # Ticket 04 — human emulator report template
 
-**Blank template: no observations recorded yet.** Copy and fill this in, or return
-the equivalent in chat. Use `not run`, `not seen`, or `unclear` where applicable.
+**Reusable blank template — ticket 04 complete.** Actual supplied observations
+are in [the human report and follow-up](04-human-observations.md), with
+[completed evidence mappings](04-evidence.md#current-acceptance-and-applicability--2026-10-08).
+The empty fields below are prompts for a repeat run, not pending acceptance work.
+Copy and fill this in for future observations, or return the equivalent in chat.
+Use `not run`, `not seen`, `unclear`, or `unavailable` where applicable.
 Keep q, typed Ctrl+C and external SIGTERM reports separate. See
 [runnable commands/actions](04-emulator-checklist.md).
 
@@ -11,11 +15,16 @@ Current target: permanent `/mnt/programming/rust/nload-rs` integration checkout,
 direct `target/btop-review-fixes/release/nload-rs` artifact built from
 `5e4661164f7afda85c266b2a45ce730276c71bad` (`implement/btop-review-fixes`),
 SHA-256 `d39b77045a2c09ac8aebac41d1a5ef3ca4593d806f90fa3a888578dd7c8b49d7`.
-Record actual checkout HEAD and source delta: integration was still `a2214c6`
-when the corrected executable was built in the separate review worktree.
+The human identified integration checkout `3765b31` and an empty source delta
+from this reviewed source. At closure review (`2ee6d8d`), the normal
+`target/release/nload-rs` and durable review executable were verified byte-identical
+with this hash. Record actual checkout HEAD and source delta for any repeat run.
 Graph rounding changed; the old `50d9a750…` artifact's live smoke does not
-validate this one. Fresh agent checks are linked in the checklist; **all human
-fields below remain pending**, including separate handled exits.
+validate this one. Applicable corrected-source gates and live smoke are linked
+in the checklist; actual human handled-exit reports are **0/130/143**, with every
+visible restoration behavior confirmed. Configured font/client OS/theme name
+were unavailable. Run A's small exit was **56×17**, not suggested 59×16; Run C's
+below-floor startup was confirmed without an exact small-size measurement.
 
 - Date / observer:
 - Worktree / branch / HEAD:
@@ -78,9 +87,9 @@ Fill **every** cell for each run. Status alone does not establish restoration.
 
 | Run / cause | Actual status | Cursor visible | Default foreground AND background | Normal typing/echo/editing | Prior shell screen/marker returned | Diagnostics |
 | --- | --- | --- | --- | --- | --- | --- |
-| A / q while small (expected 0) | pending | pending | pending | pending | pending | pending |
-| B / physical Ctrl+C (expected 130) | pending | pending | pending | pending | pending | pending |
-| C / external SIGTERM child (expected 143) | pending | pending | pending | pending | pending | pending |
+| A / q while small (expected 0) | fill | fill | fill | fill | fill | fill |
+| B / physical Ctrl+C (expected 130) | fill | fill | fill | fill | fill | fill |
+| C / external SIGTERM child (expected 143) | fill | fill | fill | fill | fill | fill |
 
 ## Scripted evidence / failures / pending items
 
@@ -92,5 +101,5 @@ Fill **every** cell for each run. Status alone does not establish restoration.
 - Unperformed or unclear required observations:
 - Optional screenshots (identify run, exact dimensions, revision/artifact):
 
-The implementer will link supplied observations to `04-evidence.md` and review
-their applicability. The blank template and expected outcomes are not evidence.
+Ticket 04's supplied observations and applicability review are linked above.
+The blank template and expected outcomes are not evidence of any repeat run.

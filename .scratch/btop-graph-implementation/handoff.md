@@ -34,8 +34,12 @@ Worktree `/tmp/opencode/nload-btop-05`, branch `implement/btop-05`, based on cle
 integration `66cd1369a36bd039b6a8ce9d7e2b815ce8146c6c`. Final gates ran on that
 revision with **zero uncommitted delta**. Executable inputs match corrected source
 `5e4661164f7afda85c266b2a45ce730276c71bad`; delivery edits are documentation only.
-The [final evidence](05-evidence.md#revision-and-artifact-applicability) records
-revision/delta and integration reconciliation.
+Accepted delivery revision: **`7b0a6a3b7632178eec5e9ccf20839bc1c398a58f`**
+(`docs: complete styled graph acceptance and delivery handoff`). The subsequent
+revision-record finalization changes only this handoff and final evidence; its
+uncommitted implementation delta is zero. The
+[final evidence](05-evidence.md#delivery-revision-and-integration-reconciliation)
+records committed revision/delta and integration reconciliation.
 
 Release artifact: `/tmp/opencode/nload-btop-05/target/release/nload-rs`.
 Also verified byte-identical to both permanent checkout artifacts:

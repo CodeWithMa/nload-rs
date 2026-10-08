@@ -357,3 +357,31 @@ planning/specification parent/map is among the edits.
 
 Final commit/integration reconciliation is recorded below. **No acceptance blocker
 remains.**
+
+### Delivery revision and integration reconciliation
+
+- Accepted delivery commit:
+  **`7b0a6a3b7632178eec5e9ccf20839bc1c398a58f`**,
+  `docs: complete styled graph acceptance and delivery handoff`.
+  Seven intended Markdown files committed, 535 insertions/21 deletions. Status was
+  clean immediately after that commit. All eight checklist items are checked,
+  ticket 05 is closed, implementation status is complete and Decisions so far has
+  its named resolution link/gist. No production/test/helper/dependency delta.
+- Before that commit, `git merge --no-edit integration/btop-styled-graphs`
+  returned **`Already up to date.`**; latest integration tip was
+  **`66cd1369a36bd039b6a8ce9d7e2b815ce8146c6c`**, ancestry check exited 0.
+  Staged full intended diff, status/recent ten commits and whitespace were inspected.
+- Final revision-record preparation is based on clean accepted commit `7b0a6a3`.
+  At recording time its **only uncommitted delta** is this reconciliation section
+  in `05-evidence.md` and the accepted-revision pointer in `handoff.md`.
+  **Uncommitted implementation delta: zero**; executable/test/manifest/lockfile
+  inputs still equal corrected `5e46611`. This documentary finalization is committed
+  separately as `docs: record final styled graph delivery revision`; its resulting
+  commit ID is the delivery branch HEAD reported to the user. No gate or human/live
+  evidence is invalidated by this delta.
+- Latest-tip reconciliation before finalization again returned **`Already up to
+  date.`** at the same full integration tip; ancestry passed. The documentation
+  audit passed again with the same counts, and status/diff/recent log/whitespace
+  checks showed only the two intended revision-record files. Standards and Spec
+  review of `git diff 66cd136...HEAD` plus that documentary delta had zero unresolved
+  findings on either axis.

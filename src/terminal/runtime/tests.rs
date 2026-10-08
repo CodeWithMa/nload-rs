@@ -24,6 +24,139 @@ fn frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
     crate::screen::render(monitor.selected_view(), width, height)
 }
 
+fn colored_frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
+    use crate::arguments::Ceilings;
+    use crate::monitor::Monitor;
+    use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
+    let mut monitor = Monitor::new(
+        StartupSelection {
+            names: vec![name.to_vec()],
+            selected: 0,
+        },
+        Ceilings {
+            incoming: 24,
+            outgoing: 24,
+        },
+        0,
+        |_| {
+            CounterOutcome::Readable(Counters {
+                incoming: 0,
+                outgoing: 0,
+            })
+        },
+    );
+    for (at, total) in [(1_000_000_000, 24), (2_000_000_000, 48)] {
+        monitor.observe(at, |_| {
+            CounterOutcome::Readable(Counters {
+                incoming: total,
+                outgoing: total,
+            })
+        });
+    }
+    crate::screen::render(monitor.selected_view(), width, height)
+}
+
+// The transport oracle takes the screen's public encoded rows as payload, with
+// literal session-independent addressing from the wire contract. Screen glyph
+// and palette correctness has separate exact oracles in screen::tests.
+fn wire(frame: &crate::screen::Frame) -> Vec<u8> {
+    let mut bytes = b"\x1b[0m\x1b[H\x1b[2J".to_vec();
+    for (row, payload) in frame.encoded_rows().iter().enumerate() {
+        bytes.extend_from_slice(format!("\x1b[{};1H", row + 1).as_bytes());
+        bytes.extend_from_slice(payload.as_bytes());
+    }
+    bytes.extend_from_slice(b"\x1b[H");
+    bytes
+}
+
+#[test]
+fn every_colored_frame_byte_boundary_resumes_exactly_before_the_latest_frame() {
+    let first = colored_frame(b"first", 60, 16);
+    let latest = colored_frame(b"latest", 80, 24);
+    let expected = wire(&first);
+    assert!(first.encoded_rows()[3].ends_with("\x1b[38;5;183m⣿\x1b[0m\x1b[0m\x1b[0m"));
+    for index in [60, 61, 98, 140, 146, 183, 96, 132, 133, 170, 176, 219] {
+        assert!(String::from_utf8_lossy(&expected).contains(&format!("\x1b[38;5;{index}m")));
+    }
+    let complete = [expected.as_slice(), wire(&latest).as_slice()].concat();
+    for transient in [io::ErrorKind::Interrupted, io::ErrorKind::WouldBlock] {
+        // Every byte offset includes each interior byte of all twelve foreground
+        // SGRs, every reset, all three UTF-8 glyph bytes and positioning commands.
+        for split in 1..expected.len() {
+            let effects = ScriptedEffects::default();
+            let mut runtime = Runtime::new(effects.clone());
+            assert!(runtime.queue_frame(&first).unwrap());
+            effects.script.borrow_mut().writes.push_back(Ok(split));
+            runtime.output_batch().unwrap();
+            assert_eq!(effects.script.borrow().emitted, expected[..split]);
+            assert!(!runtime.queue_frame(&latest).unwrap());
+            effects
+                .script
+                .borrow_mut()
+                .writes
+                .push_back(Err(transient.into()));
+            runtime.output_batch().unwrap();
+            assert_eq!(effects.script.borrow().emitted, expected[..split]);
+            assert_eq!(feed(&mut runtime, &effects, b"\x1b[C", 0), [Event::Forward]);
+            assert!(!runtime.queue_frame(&latest).unwrap());
+            // A second short write proves the offset survives multiple batches.
+            effects.script.borrow_mut().writes.push_back(Ok(1));
+            runtime.output_batch().unwrap();
+            runtime.output_batch().unwrap();
+            assert!(!runtime.has_pending_output());
+            assert_eq!(effects.script.borrow().emitted, expected);
+            assert!(runtime.queue_frame(&latest).unwrap());
+            runtime.output_batch().unwrap();
+            assert_eq!(
+                effects.script.borrow().emitted,
+                complete,
+                "{transient:?} at {split}"
+            );
+        }
+    }
+}
+
+#[test]
+fn untouched_colored_frames_replace_after_transients_and_large_frames_yield_each_batch() {
+    let effects = ScriptedEffects::default();
+    let mut runtime = Runtime::new(effects.clone());
+    for (name, transient) in [
+        (b"obsolete".as_slice(), io::ErrorKind::WouldBlock),
+        (b"also obsolete".as_slice(), io::ErrorKind::Interrupted),
+    ] {
+        assert!(runtime.queue_frame(&colored_frame(name, 60, 16)).unwrap());
+        effects
+            .script
+            .borrow_mut()
+            .writes
+            .push_back(Err(transient.into()));
+        runtime.output_batch().unwrap();
+        assert!(effects.script.borrow().emitted.is_empty());
+    }
+    let latest = colored_frame(b"latest", 1000, 1000);
+    let expected = wire(&latest);
+    assert!(expected.len() > 16 * 1024);
+    assert!(runtime.queue_frame(&latest).unwrap());
+    for _ in 0..expected.len().div_ceil(16 * 1024) {
+        assert!(runtime.has_pending_output());
+        let before = effects.script.borrow().calls.len();
+        runtime.output_batch().unwrap();
+        assert_eq!(effects.script.borrow().calls.len(), before + 1);
+        let script = effects.script.borrow();
+        let Some(Call::Write(bytes)) = script.calls.last() else {
+            panic!("missing write")
+        };
+        assert!(bytes.len() <= 16 * 1024);
+        drop(script);
+        assert_eq!(
+            feed(&mut runtime, &effects, b"\x1b[D", 0),
+            [Event::Backward]
+        );
+    }
+    assert!(!runtime.has_pending_output());
+    assert_eq!(effects.script.borrow().emitted, expected);
+}
+
 #[test]
 fn screen_frames_clear_in_default_style_and_keep_row_resets_and_cell_bounds() {
     let effects = ScriptedEffects::default();

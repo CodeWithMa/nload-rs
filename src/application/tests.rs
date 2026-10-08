@@ -67,6 +67,7 @@ struct Tick {
     notifications: Notifications,
     after_read: Option<u64>,
     dimensions: Option<(usize, usize)>,
+    on_wait: Option<Box<dyn FnOnce(&ScriptedEffects)>>,
 }
 
 impl Tick {
@@ -82,6 +83,7 @@ impl Tick {
             notifications: Notifications::default(),
             after_read: None,
             dimensions: None,
+            on_wait: None,
         }
     }
     fn signal(at: u64, shutdown: Shutdown) -> Self {
@@ -141,6 +143,9 @@ impl RuntimeEffects for Effects {
                 .dimensions
                 .push_back(Ok(dimensions));
         }
+        if let Some(effect) = tick.on_wait {
+            effect(&self.base);
+        }
         Ok(tick.ready)
     }
     fn notifications(&mut self) -> io::Result<Notifications> {
@@ -189,6 +194,7 @@ struct Harness {
     view: Option<View>,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    probe_hook: bool,
 }
 
 impl Harness {
@@ -231,17 +237,30 @@ impl Harness {
             view: None,
             stdout: Vec::new(),
             stderr: Vec::new(),
+            probe_hook: false,
         }
     }
 
     fn run(&mut self, args: &[OsString]) -> u8 {
         let _lock = HOOK_LOCK.lock().unwrap();
+        let hook_calls = self
+            .probe_hook
+            .then(|| std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+        let _previous_hook = hook_calls.as_ref().map(|calls| {
+            let previous = PreviousHook(Some(std::panic::take_hook()));
+            let calls = calls.clone();
+            std::panic::set_hook(Box::new(move |_| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }));
+            previous
+        });
         invoke(
             args.iter().cloned(),
             &mut self.stdout,
             &mut AfterCleanupWriter {
                 bytes: &mut self.stderr,
                 session: self.session.clone(),
+                hook_calls,
             },
             |config| {
                 let mut session = Session::new(self.session.clone());
@@ -334,6 +353,15 @@ impl Harness {
 struct AfterCleanupWriter<'a> {
     bytes: &'a mut Vec<u8>,
     session: ScriptSession,
+    hook_calls: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+}
+
+type PanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Sync + Send + 'static>;
+struct PreviousHook(Option<PanicHook>);
+impl Drop for PreviousHook {
+    fn drop(&mut self) {
+        std::panic::set_hook(self.0.take().unwrap());
+    }
 }
 
 impl Write for AfterCleanupWriter<'_> {
@@ -346,6 +374,21 @@ impl Write for AfterCleanupWriter<'_> {
                 "diagnostic emitted before exhaustive cleanup"
             );
         }
+        if let Some(calls) = self.hook_calls.take() {
+            use std::sync::atomic::Ordering;
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                0,
+                "panic hook ran before restoration/reporting"
+            );
+            let _ =
+                std::panic::catch_unwind(|| panic!("diagnostic writer probes restored prior hook"));
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "prior panic hook not restored before stderr"
+            );
+        }
         self.bytes.write(bytes)
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -355,6 +398,307 @@ impl Write for AfterCleanupWriter<'_> {
 
 fn args(tokens: &[&str]) -> Vec<OsString> {
     tokens.iter().map(OsString::from).collect()
+}
+
+fn output_tick(at: u64, write: Option<io::Result<usize>>) -> Tick {
+    let mut tick = Tick::input(at, b"");
+    tick.ready.input = false;
+    tick.on_wait = write.map(|result| {
+        Box::new(move |effects: &ScriptedEffects| {
+            effects.script.borrow_mut().writes.push_back(result);
+        }) as Box<dyn FnOnce(&ScriptedEffects)>
+    });
+    tick
+}
+
+fn colored_harness(ticks: Vec<Tick>) -> Harness {
+    let mut h = Harness::new(&[(b"a", 0), (b"b", 0), (b"c", 0)], ticks);
+    h.session.state.borrow_mut().init_delay = SAMPLE_NS;
+    h.session.state.borrow_mut().dimensions = Some((60, 16));
+    h.counters
+        .rounds
+        .push_back(Ok(snapshot(&[(b"a", 128), (b"b", 128), (b"c", 128)])));
+    h
+}
+
+fn observed_wire(selected: usize, width: usize, height: usize, rounds: usize) -> Vec<u8> {
+    let first = Ok(snapshot(&[(b"a", 0), (b"b", 0), (b"c", 0)]));
+    let mut monitor = Monitor::new(
+        first.as_ref().unwrap().startup(None).unwrap(),
+        arguments::Ceilings {
+            incoming: 128,
+            outgoing: 128,
+        },
+        0,
+        |name| counter_outcome(&first, name),
+    );
+    for round in 1..=rounds {
+        let totals = round as u64 * 128;
+        let snapshot = Ok(snapshot(&[(b"a", totals), (b"b", totals), (b"c", totals)]));
+        monitor.observe(round as u64 * SAMPLE_NS, |name| {
+            counter_outcome(&snapshot, name)
+        });
+    }
+    for _ in 0..selected {
+        monitor.forward();
+    }
+    let frame = screen::render(monitor.selected_view(), width, height);
+    let mut expected = b"\x1b[0m\x1b[H\x1b[2J".to_vec();
+    for (index, row) in frame.encoded_rows().iter().enumerate() {
+        expected.extend_from_slice(format!("\x1b[{};1H", index + 1).as_bytes());
+        expected.extend_from_slice(row.as_bytes());
+    }
+    expected.extend_from_slice(b"\x1b[H");
+    expected
+}
+
+#[test]
+fn colored_backpressure_coalesces_navigation_and_resize_without_stale_frames_or_samples() {
+    let old = observed_wire(0, 60, 16, 1);
+    let split = old
+        .windows("⢸".len())
+        .position(|bytes| bytes == "⢸".as_bytes())
+        .unwrap()
+        + 1;
+    let mut forward = Tick::input(SAMPLE_NS + 1, &b"\x1b[C".repeat(85));
+    forward.after_read = Some(SECOND);
+    forward.notifications.resized = true;
+    forward.dimensions = Some((60, 15));
+    let mut backward = Tick::input(SECOND + 1, &b"\x1b[D".repeat(85));
+    backward.notifications.resized = true;
+    backward.dimensions = Some((61, 17));
+    let mut latest = Tick::input(SECOND + 2, b"\x1b[C");
+    latest.notifications.resized = true;
+    latest.dimensions = Some((80, 24));
+    for tick in [&mut forward, &mut backward, &mut latest] {
+        tick.on_wait = Some(Box::new(|effects| {
+            effects
+                .script
+                .borrow_mut()
+                .writes
+                .push_back(Err(io::ErrorKind::WouldBlock.into()));
+        }));
+    }
+    let mut h = colored_harness(vec![
+        output_tick(SAMPLE_NS, Some(Ok(split))),
+        forward,
+        backward,
+        latest,
+        output_tick(SECOND + 3, None),
+        output_tick(SECOND + 4, None),
+        Tick::input(SECOND + 5, b"q"),
+    ]);
+    h.counters
+        .rounds
+        .push_back(Ok(snapshot(&[(b"a", 256), (b"b", 256), (b"c", 256)])));
+    assert_eq!(h.run(&args(&["-i", "1", "-o", "1"])), 0);
+    assert_eq!(
+        h.effects.base.script.borrow().emitted,
+        [old, observed_wire(1, 80, 24, 2)].concat()
+    );
+    let view = h.view.as_ref().unwrap();
+    assert_eq!(view.name, b"b");
+    assert_eq!(view.samples, [(SAMPLE_NS, 256.0), (SECOND, 256.0)]);
+    assert_eq!(h.counters.calls, 3);
+    let log = h.clock.log.borrow();
+    let reads: Vec<_> = log
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| **call == "read")
+        .map(|(i, _)| i)
+        .collect();
+    let acquisitions: Vec<_> = log
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| **call == "acquire")
+        .map(|(i, _)| i)
+        .collect();
+    assert!(acquisitions[1] < reads[0]);
+    assert!(reads[0] < acquisitions[2] && acquisitions[2] < reads[1]);
+    assert!(
+        h.effects
+            .base
+            .script
+            .borrow()
+            .calls
+            .iter()
+            .all(|call| match call {
+                Call::Read(size) => *size <= 256,
+                Call::Write(bytes) => bytes.len() <= 16 * 1024,
+                _ => true,
+            })
+    );
+    assert!(h.waits().iter().take(5).all(|(_, _, output)| *output));
+    h.restored();
+    assert!(h.stderr.is_empty());
+}
+
+#[test]
+fn handled_exits_after_every_colored_output_prefix_cancel_reset_and_restore() {
+    let old = observed_wire(0, 60, 16, 1);
+    assert!(String::from_utf8_lossy(&old).contains("\x1b[38;5;219m⢸"));
+    for cause in 0..5 {
+        for split in 1..old.len() {
+            // Exit at the next deadline: shutdown must preempt that acquisition
+            // and any queued input/resize/output, even inside a UTF-8/SGR prefix.
+            let exit = match cause {
+                0 => Tick::input(SAMPLE_NS + 1, b"q"),
+                1 => Tick::input(SAMPLE_NS + 1, b"Q"),
+                2 => Tick::input(SAMPLE_NS + 1, b"\x03"),
+                3 => Tick::signal(SECOND, Shutdown::Interrupt),
+                _ => Tick::signal(SECOND, Shutdown::Terminate),
+            };
+            let mut h = colored_harness(vec![output_tick(SAMPLE_NS, Some(Ok(split))), exit]);
+            assert_eq!(
+                h.run(&args(&["-i", "1", "-o", "1"])),
+                [0, 0, 130, 130, 143][cause]
+            );
+            assert_eq!(h.effects.base.script.borrow().emitted, old[..split]);
+            assert_eq!(h.counters.calls, 2);
+            assert_eq!(h.view.as_ref().unwrap().samples, [(SAMPLE_NS, 256.0)]);
+            h.restored();
+            assert_eq!(
+                h.session.state.borrow().emitted,
+                b"\x1b[?1049h\x1b[?25l\x18\x1b[0m\x18\x1b[?25h\x18\x1b[?1049l"
+            );
+            assert!(h.stderr.is_empty());
+        }
+    }
+}
+
+#[test]
+fn colored_runtime_faults_and_panics_restore_before_diagnostics_and_prior_hook_probe() {
+    let old = observed_wire(0, 60, 16, 1);
+    let split = old
+        .windows(3)
+        .position(|bytes| bytes == "⢸".as_bytes())
+        .unwrap()
+        + 2;
+    for variant in 0..10 {
+        let mut failure = Tick::input(SAMPLE_NS + 1, b"x");
+        if variant == 0 {
+            failure.input.clear();
+        }
+        if variant == 5 {
+            failure.notifications.resized = true;
+        }
+        if variant == 9 {
+            failure.at = SECOND;
+        }
+        failure.on_wait = Some(Box::new(move |effects| {
+            let mut script = effects.script.borrow_mut();
+            match variant {
+                1 => {
+                    script.reads.clear();
+                    script
+                        .reads
+                        .push_back(Err(io::ErrorKind::BrokenPipe.into()));
+                }
+                2 => script
+                    .writes
+                    .push_back(Err(io::ErrorKind::BrokenPipe.into())),
+                3 => effects
+                    .clock
+                    .0
+                    .borrow_mut()
+                    .readings
+                    .push_back(Err(io::Error::other("runtime clock fault"))),
+                4 => script
+                    .waits
+                    .push_back(Err(io::Error::other("runtime poll fault"))),
+                5 => script
+                    .dimensions
+                    .push_back(Err(io::Error::other("runtime resize fault"))),
+                6 => script
+                    .notifications
+                    .push_back(Err(io::Error::other("runtime signal fault"))),
+                7 => script.panic_on_write = true,
+                8 => effects.clock.0.borrow_mut().readings.push_back(Ok(0)),
+                _ => {}
+            }
+            // Poll failure needs another wait; keep the colored prefix blocked.
+            if variant == 4 {
+                script
+                    .writes
+                    .push_back(Err(io::ErrorKind::WouldBlock.into()));
+            }
+        }));
+        let mut h = colored_harness(vec![output_tick(SAMPLE_NS, Some(Ok(split))), failure]);
+        h.probe_hook = true;
+        if variant == 9 {
+            h.counters.panic_at = Some(3);
+        }
+        assert_eq!(
+            h.run(&args(&["-i", "1", "-o", "1"])),
+            1,
+            "variant {variant}"
+        );
+        assert_eq!(
+            h.effects.base.script.borrow().emitted,
+            old[..split],
+            "variant {variant}"
+        );
+        assert!(!h.stderr.is_empty());
+        if matches!(variant, 7 | 9) {
+            assert!(String::from_utf8_lossy(&h.stderr).contains("caught panic"));
+        }
+        h.restored();
+        assert!(
+            h.session
+                .state
+                .borrow()
+                .emitted
+                .ends_with(b"\x18\x1b[0m\x18\x1b[?25h\x18\x1b[?1049l")
+        );
+    }
+}
+
+#[test]
+fn colored_exit_cleanup_errors_and_panics_preserve_status_and_attempt_all_stages() {
+    let old = observed_wire(0, 60, 16, 1);
+    let split = old
+        .windows(3)
+        .position(|bytes| bytes == "⢸".as_bytes())
+        .unwrap()
+        + 1;
+    for panics in [false, true] {
+        for cause in 0..6 {
+            let exit = match cause {
+                0 => Tick::input(SAMPLE_NS + 1, b"q"),
+                1 => Tick::input(SAMPLE_NS + 1, b"Q"),
+                2 => Tick::input(SAMPLE_NS + 1, b"\x03"),
+                3 => Tick::signal(SECOND, Shutdown::Interrupt),
+                4 => Tick::signal(SECOND, Shutdown::Terminate),
+                _ => Tick::input(SAMPLE_NS + 1, b""), // fatal input EOF
+            };
+            let mut h = colored_harness(vec![output_tick(SAMPLE_NS, Some(Ok(split))), exit]);
+            h.probe_hook = true;
+            for operation in [
+                "reset",
+                "show",
+                "leave",
+                "restore-termios",
+                "restore-input",
+                "restore-output",
+                "release",
+            ] {
+                h.session
+                    .state
+                    .borrow_mut()
+                    .faults
+                    .insert(operation, panics);
+            }
+            assert_eq!(
+                h.run(&args(&["-i", "1", "-o", "1"])),
+                [1, 1, 130, 130, 143, 1][cause]
+            );
+            h.restored();
+            assert_eq!(h.effects.base.script.borrow().emitted, old[..split]);
+            let diagnostics = String::from_utf8_lossy(&h.stderr);
+            assert_eq!(diagnostics.matches("terminal cleanup:").count(), 7);
+            assert!(diagnostics.contains("reset styling"));
+        }
+    }
 }
 
 #[test]
@@ -919,6 +1263,7 @@ fn initialization_and_caught_startup_runtime_panics_use_the_guarded_application_
     ] {
         let mut h = Harness::new(&[(b"a", 0)], vec![]);
         h.session.state.borrow_mut().faults.insert(name, false);
+        h.probe_hook = true;
         assert_eq!(h.plain(), 1);
         assert!(String::from_utf8_lossy(&h.stderr).contains(name));
         assert_eq!(
@@ -928,6 +1273,7 @@ fn initialization_and_caught_startup_runtime_panics_use_the_guarded_application_
     }
     for variant in 0..3 {
         let mut h = Harness::new(&[(b"a", 0)], vec![Tick::input(SAMPLE_NS, b"q")]);
+        h.probe_hook = true;
         match variant {
             0 => h.counters.panic_at = Some(1),
             1 => {

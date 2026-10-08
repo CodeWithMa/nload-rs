@@ -218,6 +218,14 @@ impl Product {
         height: usize,
         predicate: impl Fn(&[String]) -> bool,
     ) -> Vec<String> {
+        self.frame_with_geometry(|_| (width, height), predicate)
+    }
+
+    fn frame_with_geometry(
+        &mut self,
+        geometry: impl Fn(&[u8]) -> (usize, usize),
+        predicate: impl Fn(&[String]) -> bool,
+    ) -> Vec<String> {
         let deadline = Instant::now() + LIMIT;
         loop {
             while let Some(start) = find(&self.pending, START) {
@@ -229,7 +237,9 @@ impl Product {
                 let Some(end) = find(&self.pending[body..], END).map(|offset| body + offset) else {
                     break;
                 };
-                let rows = decode_rows(&self.pending[body..end], width, height);
+                let payload = &self.pending[body..end];
+                let (width, height) = geometry(payload);
+                let rows = decode_rows(payload, width, height);
                 self.pending.drain(..end + END.len());
                 if predicate(&rows) {
                     return rows;
@@ -494,6 +504,140 @@ fn normal_controls_restore_real_modes_shared_flags_and_protocol() {
     }
 }
 
+fn loopback_burst() {
+    use std::net::UdpSocket;
+    let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    receiver.set_read_timeout(Some(LIMIT)).unwrap();
+    let payload = [0x5a; 4096];
+    let mut received = [0; 4096];
+    for _ in 0..16 {
+        assert_eq!(
+            sender
+                .send_to(&payload, receiver.local_addr().unwrap())
+                .unwrap(),
+            payload.len()
+        );
+        assert_eq!(receiver.recv_from(&mut received).unwrap().0, payload.len());
+    }
+}
+
+fn colored_product() -> Product {
+    let mut product = Product::spawn(60, 16, |command, _, _| {
+        command.args(["-i", "1", "-o", "1", "lo"]);
+    });
+    product.frame(60, 16, |_| true);
+    loopback_burst();
+    product.frame(60, 16, |rows| {
+        rows[3]
+            .chars()
+            .nth(29)
+            .is_some_and(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph))
+    });
+    assert!(find(&product.bytes, b"\x1b[38;5;183m").is_some());
+    assert!(find(&product.bytes, b"\x1b[38;5;219m").is_some());
+    product
+}
+
+#[test]
+fn colored_normal_signal_and_runtime_eof_exits_restore_os_state_and_protocol() {
+    for cause in 0..6 {
+        let mut product = colored_product();
+        assert_raw(&product);
+        match cause {
+            0 => product.send(b"q"),
+            1 => product.send(b"Q"),
+            2 => product.send(b"\x03"),
+            3 => product.signal(libc::SIGINT),
+            4 => product.signal(libc::SIGTERM),
+            _ => {
+                let canonical = product.input.saved_mode;
+                // SAFETY: real retained input terminal and initialized termios.
+                checked(unsafe {
+                    libc::tcsetattr(product.input.slave.as_raw_fd(), libc::TCSANOW, &canonical)
+                });
+                product.send(&[canonical.c_cc[libc::VEOF]]);
+            }
+        }
+        let stderr = product.finish([0, 0, 130, 130, 143, 1][cause], true);
+        if cause == 5 {
+            assert!(stderr.contains("terminal input closed"));
+        } else {
+            assert!(stderr.is_empty(), "{stderr}");
+        }
+        product.assert_cleanup();
+    }
+}
+
+#[test]
+fn colored_backpressure_resumes_a_complete_large_frame_then_recovers_latest_resize() {
+    let mut product = colored_product();
+    product.output.resize(1000, 1000);
+    product.signal(libc::SIGWINCH);
+    wait_backpressure(&product);
+    // Input and resize arrive while a colored frame is partially written. Drain
+    // only after requesting the latest small view; the started large frame must
+    // complete first. Different heights identify each permitted fixture geometry.
+    product.send(b"\x1b[C\x1b[D\x1b[C\x1b[D");
+    product.output.resize(59, 15);
+    product.signal(libc::SIGWINCH);
+    let mut saw_large = false;
+    let rows = product.frame_with_geometry(
+        |body| {
+            if find(body, b"\x1b[1000;1H").is_some() {
+                (1000, 1000)
+            } else if find(body, b"\x1b[16;1H").is_some() {
+                (60, 16)
+            } else {
+                (59, 15)
+            }
+        },
+        |rows| rows[0].starts_with("Terminal too small"),
+    );
+    // The strict decoder has consumed the complete large frame on its way to the
+    // warning. Audit the captured bytes independently for a colored tall frame.
+    let mut remaining = product.bytes.as_slice();
+    while let Some(start) = find(remaining, START) {
+        remaining = &remaining[start + START.len()..];
+        let Some(end) = find(remaining, END) else {
+            break;
+        };
+        let body = &remaining[..end];
+        if find(body, b"\x1b[1000;1H").is_some() {
+            assert!(find(body, b"\x1b[38;5;").is_some());
+            decode_rows(body, 1000, 1000);
+            saw_large = true;
+        } else if find(body, b"\x1b[16;1H").is_none() {
+            assert!(
+                find(body, b"\x1b[38;5;").is_none(),
+                "small view must not select a palette"
+            );
+        }
+        remaining = &remaining[end + END.len()..];
+    }
+    assert!(saw_large, "started large frame was lost or interleaved");
+    assert!(rows.iter().all(|row| row.is_ascii()));
+    product.output.resize(80, 24);
+    product.signal(libc::SIGWINCH);
+    let recovered = product.frame_with_geometry(
+        |body| {
+            if find(body, b"\x1b[24;1H").is_some() {
+                (80, 24)
+            } else {
+                (59, 15)
+            }
+        },
+        |rows| rows.len() == 24 && rows[1].starts_with('='),
+    );
+    assert!(recovered.iter().any(|row| {
+        row.chars()
+            .any(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph))
+    }));
+    product.send(b"q");
+    assert!(product.finish(0, true).is_empty());
+    product.assert_cleanup();
+}
+
 #[test]
 fn shared_terminal_description_and_existing_nonblocking_flags_are_preserved() {
     for already_nonblocking in [false, true] {
@@ -621,8 +765,6 @@ fn small_startup_resize_sampling_navigation_and_quit_keep_bounded_rows() {
 
 #[test]
 fn accepted_full_views_emit_colored_braille_under_no_color_and_locale_declarations() {
-    use std::net::UdpSocket;
-
     for (width, height, locale, no_color) in [
         (60, 16, None, None),
         (60, 16, Some("C"), Some("1")),
@@ -649,16 +791,7 @@ fn accepted_full_views_emit_colored_braille_under_no_color_and_locale_declaratio
 
         // Ordinary nonprivileged loopback traffic after the baseline. Receive
         // each datagram immediately so queue capacity is not a timing oracle.
-        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
-        receiver.set_read_timeout(Some(LIMIT)).unwrap();
-        let address = receiver.local_addr().unwrap();
-        let payload = [0x5a; 4096];
-        let mut received = [0; 4096];
-        for _ in 0..16 {
-            assert_eq!(sender.send_to(&payload, address).unwrap(), payload.len());
-            assert_eq!(receiver.recv_from(&mut received).unwrap().0, payload.len());
-        }
+        loopback_burst();
         let graph_width = width as usize - 30;
         let rows = product.frame(width as usize, height as usize, |rows| {
             matches!(rows[3].chars().nth(graph_width - 1), Some('⢸' | '⣿'))
@@ -764,6 +897,7 @@ fn read_only_terminal_output_fails_setup_and_restores_changed_os_state() {
     });
     let stderr = product.finish(1, true);
     assert!(stderr.contains("Bad file descriptor"));
+    assert!(stderr.contains("reset styling"));
     assert!(stderr.contains("leave alternate screen"));
     assert!(product.bytes.is_empty());
     product.input.assert_restored();
@@ -774,8 +908,7 @@ fn read_only_terminal_output_fails_setup_and_restores_changed_os_state() {
 #[test]
 fn runtime_input_and_output_hangups_fail_and_attempt_remaining_restoration() {
     for input_hangup in [true, false] {
-        let mut product = Product::start(80, 24);
-        product.frame(80, 24, |_| true);
+        let mut product = colored_product();
         if input_hangup {
             product.input.master.take();
         } else {
@@ -793,6 +926,7 @@ fn runtime_input_and_output_hangups_fail_and_attempt_remaining_restoration() {
             assert!(product.bytes.ends_with(RESTORE));
         } else {
             product.input.assert_restored();
+            assert!(stderr.contains("reset styling"));
             assert!(stderr.contains("show cursor"));
             assert!(stderr.contains("leave alternate screen"));
         }
@@ -859,6 +993,7 @@ fn flow_stopped_output_during_setup_restores_os_state_despite_cleanup_failure() 
     });
     let stderr = product.finish(1, false);
     assert!(stderr.contains("temporarily unavailable"));
+    assert!(stderr.contains("reset styling"));
     assert!(stderr.contains("leave alternate screen"));
     product.input.assert_restored();
     product.output.assert_restored();
@@ -873,8 +1008,7 @@ fn backpressured_runtime_still_handles_quit_and_signal_with_bounded_cleanup() {
         (Some(libc::SIGINT), 130),
         (Some(libc::SIGTERM), 143),
     ] {
-        let mut product = Product::start(80, 24);
-        product.frame(80, 24, |_| true);
+        let mut product = colored_product();
         // A large but ordinary winsize creates a real partially emitted frame.
         product.output.resize(1000, 1000);
         product.signal(libc::SIGWINCH);
@@ -891,6 +1025,7 @@ fn backpressured_runtime_still_handles_quit_and_signal_with_bounded_cleanup() {
             product.send(b"q");
         }
         let stderr = product.finish(status, false);
+        assert!(stderr.contains("reset styling"), "stderr: {stderr}");
         assert!(stderr.contains("show cursor"), "stderr: {stderr}");
         assert!(
             stderr.contains("leave alternate screen"),

@@ -52,6 +52,7 @@ pub(crate) struct EffectsScript {
     pub(crate) reads: VecDeque<io::Result<Vec<u8>>>,
     pub(crate) writes: VecDeque<io::Result<usize>>,
     pub(crate) emitted: Vec<u8>,
+    pub(crate) panic_on_write: bool,
 }
 
 #[derive(Clone, Default)]
@@ -111,6 +112,10 @@ impl RuntimeEffects for ScriptedEffects {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let mut script = self.script.borrow_mut();
         script.calls.push(Call::Write(bytes.to_vec()));
+        if std::mem::take(&mut script.panic_on_write) {
+            drop(script);
+            panic!("scripted runtime write panic");
+        }
         let count = script.writes.pop_front().unwrap_or(Ok(bytes.len()))?;
         if count <= bytes.len() {
             script.emitted.extend_from_slice(&bytes[..count]);

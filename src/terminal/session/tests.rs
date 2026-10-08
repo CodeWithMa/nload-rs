@@ -31,6 +31,7 @@ struct State {
     emitted: Vec<u8>,
     dimensions: (usize, usize),
     pending: Notifications,
+    waits: Vec<Duration>,
 }
 
 impl Default for State {
@@ -45,6 +46,7 @@ impl Default for State {
             emitted: Vec::new(),
             dimensions: (80, 24),
             pending: Notifications::default(),
+            waits: Vec::new(),
         }
     }
 }
@@ -164,7 +166,8 @@ impl SessionOps for Script {
         Ok(count)
     }
 
-    fn wait_writable(&mut self, _: Duration) -> io::Result<()> {
+    fn wait_writable(&mut self, timeout: Duration) -> io::Result<()> {
+        self.state.borrow_mut().waits.push(timeout);
         self.step("wait")?;
         Ok(())
     }
@@ -212,23 +215,203 @@ const RESTORE: &[&str] = &[
 
 #[test]
 fn explicit_and_drop_cleanup_cancel_partial_sgr_and_reset_before_screen_restoration() {
-    for explicit in [true, false] {
-        let (mut session, state) = Script::new();
-        session.initialize().unwrap();
-        state.borrow_mut().emitted.extend_from_slice(b"\x1b[38;5;");
-        state.borrow_mut().log.clear();
-        if explicit {
-            assert!(session.cleanup().is_empty());
+    use crate::arguments::Ceilings;
+    use crate::monitor::Monitor;
+    use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
+    let mut monitor = Monitor::new(
+        StartupSelection {
+            names: vec![b"eth0".to_vec()],
+            selected: 0,
+        },
+        Ceilings {
+            incoming: 128,
+            outgoing: 128,
+        },
+        0,
+        |_| {
+            CounterOutcome::Readable(Counters {
+                incoming: 0,
+                outgoing: 0,
+            })
+        },
+    );
+    monitor.observe(500_000_000, |_| {
+        CounterOutcome::Readable(Counters {
+            incoming: 128,
+            outgoing: 128,
+        })
+    });
+    let frame = crate::screen::render(monitor.selected_view(), 60, 16);
+    for row in frame
+        .encoded_rows()
+        .iter()
+        .filter(|row| row.contains("\x1b[38;5;"))
+    {
+        for split in 1..row.len() {
+            for explicit in [true, false] {
+                let (mut session, state) = Script::new();
+                session.initialize().unwrap();
+                // Runtime output may stop at any byte, including midway through an
+                // actual screen-constructed UTF-8 glyph, foreground or reset escape.
+                state
+                    .borrow_mut()
+                    .emitted
+                    .extend_from_slice(&row.as_bytes()[..split]);
+                state.borrow_mut().log.clear();
+                if explicit {
+                    assert!(session.cleanup().is_empty());
+                }
+                drop(session);
+                let expected = [
+                    ENTER_SCREEN,
+                    HIDE_CURSOR,
+                    &row.as_bytes()[..split],
+                    b"\x18\x1b[0m\x18\x1b[?25h\x18\x1b[?1049l",
+                ]
+                .concat();
+                assert_eq!(state.borrow().emitted, expected);
+                assert_eq!(&state.borrow().log[..3], ["reset", "show", "leave"]);
+                assert_restored(&state);
+            }
         }
-        drop(session);
-        assert!(
-            state
-                .borrow()
-                .emitted
-                .ends_with(b"\x1b[38;5;\x18\x1b[0m\x18\x1b[?25h\x18\x1b[?1049l")
-        );
-        assert_eq!(&state.borrow().log[..3], ["reset", "show", "leave"]);
-        assert_restored(&state);
+    }
+}
+
+#[test]
+fn every_cleanup_sequence_split_resumes_or_cancels_before_remaining_restorations() {
+    for (operation, command) in [
+        ("reset", RESET_STYLE),
+        ("show", SHOW_CURSOR),
+        ("leave", LEAVE_SCREEN),
+    ] {
+        for split in 1..command.len() {
+            for failed in [false, true] {
+                let (mut session, state) = Script::new();
+                session.initialize().unwrap();
+                state.borrow_mut().log.clear();
+                state.borrow_mut().emitted.clear();
+                fault(
+                    &state,
+                    operation,
+                    &[Step::Short(split), Step::Interrupted, Step::WouldBlock],
+                );
+                fault(
+                    &state,
+                    "wait",
+                    if failed {
+                        &[Step::Error]
+                    } else {
+                        &[Step::Interrupted]
+                    },
+                );
+                let errors = session.cleanup();
+                assert_eq!(errors.len(), usize::from(failed), "{operation} at {split}");
+                let mut expected = Vec::new();
+                for (name, bytes) in [
+                    ("reset", RESET_STYLE),
+                    ("show", SHOW_CURSOR),
+                    ("leave", LEAVE_SCREEN),
+                ] {
+                    expected.extend_from_slice(if name == operation && failed {
+                        &bytes[..split]
+                    } else {
+                        bytes
+                    });
+                }
+                assert_eq!(state.borrow().emitted, expected, "{operation} at {split}");
+                assert_restored(&state);
+                assert!(state.borrow().log.ends_with(&RESTORE[3..]));
+                assert!(
+                    state
+                        .borrow()
+                        .waits
+                        .iter()
+                        .all(|duration| *duration <= Duration::from_millis(100))
+                );
+                let log = state.borrow().log.clone();
+                assert!(session.cleanup().is_empty());
+                drop(session);
+                assert_eq!(
+                    state.borrow().log,
+                    log,
+                    "cleanup must not repeat consumed stages"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn each_cleanup_error_or_panic_keeps_remaining_stages_and_selected_status() {
+    let _lock = HOOK_LOCK.lock().unwrap();
+    for operation in RESTORE {
+        for step in [Step::Error, Step::Panic] {
+            for result in [
+                Ok(Shutdown::Quit),
+                Ok(Shutdown::Interrupt),
+                Ok(Shutdown::Terminate),
+                Err(Failure::from("runtime fault".to_owned())),
+            ] {
+                let (mut session, state) = Script::new();
+                let selected = result.as_ref().map_or(1, |shutdown| shutdown.status());
+                let report = guarded(&mut session, |session| {
+                    session.initialize()?;
+                    state.borrow_mut().log.clear();
+                    fault(&state, operation, &[step]);
+                    result
+                });
+                assert_eq!(
+                    report.status,
+                    if selected == 0 { 1 } else { selected },
+                    "{operation}"
+                );
+                assert_eq!(state.borrow().log, RESTORE, "{operation}");
+                assert_eq!(
+                    report
+                        .diagnostics
+                        .iter()
+                        .filter(|message| message.starts_with("terminal cleanup:"))
+                        .count(),
+                    1
+                );
+                let log = state.borrow().log.clone();
+                drop(session);
+                assert_eq!(state.borrow().log, log);
+            }
+        }
+    }
+}
+
+#[test]
+fn every_partial_initialization_sequence_failure_or_panic_resets_applicable_stages() {
+    let _lock = HOOK_LOCK.lock().unwrap();
+    for (operation, command) in [("enter", ENTER_SCREEN), ("hide", HIDE_CURSOR)] {
+        for split in 1..command.len() {
+            for step in [Step::WouldBlock, Step::Panic] {
+                let (mut session, state) = Script::new();
+                fault(&state, operation, &[Step::Short(split), step]);
+                let report = guarded(&mut session, |session| {
+                    session.initialize()?;
+                    Ok(Shutdown::Quit)
+                });
+                assert_eq!(report.status, 1);
+                let expected_cleanup = if operation == "enter" {
+                    [RESET_STYLE, LEAVE_SCREEN].concat()
+                } else {
+                    [RESET_STYLE, SHOW_CURSOR, LEAVE_SCREEN].concat()
+                };
+                let mut expected = if operation == "hide" {
+                    ENTER_SCREEN.to_vec()
+                } else {
+                    Vec::new()
+                };
+                expected.extend_from_slice(&command[..split]);
+                expected.extend_from_slice(&expected_cleanup);
+                assert_eq!(state.borrow().emitted, expected, "{operation} at {split}");
+                assert_restored(&state);
+                assert!(state.borrow().log.ends_with(&RESTORE[3..]));
+            }
+        }
     }
 }
 
@@ -363,18 +546,20 @@ fn every_initialization_failure_restores_only_applicable_attempted_effects() {
         ),
         ("hide", RESTORE),
     ] {
-        let (mut session, state) = Script::new();
-        fault(&state, stage, &[Step::Error]);
-        let report = guarded(&mut session, |session| {
-            session.initialize().map_err(|error| error.to_string())?;
-            panic!("failed initialization must not execute runtime");
-        });
-        assert_eq!(report.status, 1, "{stage}");
-        assert_eq!(report.diagnostics.len(), 1, "{stage}");
-        let log = &state.borrow().log;
-        let failure_index = log.iter().position(|name| *name == stage).unwrap();
-        assert_eq!(&log[failure_index + 1..], expected, "{stage}");
-        assert_restored(&state);
+        for step in [Step::Error, Step::Panic] {
+            let (mut session, state) = Script::new();
+            fault(&state, stage, &[step]);
+            let report = guarded(&mut session, |session| {
+                session.initialize().map_err(|error| error.to_string())?;
+                panic!("failed initialization must not execute runtime");
+            });
+            assert_eq!(report.status, 1, "{stage}");
+            assert_eq!(report.diagnostics.len(), 1, "{stage}");
+            let log = &state.borrow().log;
+            let failure_index = log.iter().position(|name| *name == stage).unwrap();
+            assert_eq!(&log[failure_index + 1..], expected, "{stage}");
+            assert_restored(&state);
+        }
     }
 }
 

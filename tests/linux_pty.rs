@@ -718,7 +718,7 @@ fn fragmented_repeated_arrows_and_ignored_sequences_reach_expected_selection() {
     let mut product = Product::start(80, 24);
     let first = product.frame(80, 24, |_| true);
     let (mut index, count) = position(&first);
-    for introducer in [b'[', b'O'] {
+    for introducer in *b"[O" {
         for (final_byte, forward) in [(b'A', false), (b'B', true), (b'C', true), (b'D', false)] {
             for split in [1, 2] {
                 let sequence = [27, introducer, final_byte];

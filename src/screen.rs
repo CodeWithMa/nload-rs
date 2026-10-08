@@ -178,7 +178,7 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: &[
         // representable value immediately below a half step to that step.
         let dots = ((fraction * (4 * height) as f64).round() as usize).min(4 * height);
         // Standard Unicode dot numbers, bottom-to-top in each independent half.
-        let numbers = if position % 2 == 0 {
+        let numbers = if position.is_multiple_of(2) {
             [7, 3, 2, 1]
         } else {
             [8, 6, 5, 4]

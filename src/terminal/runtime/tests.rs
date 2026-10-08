@@ -210,7 +210,7 @@ fn feed(
 
 #[test]
 fn every_csi_and_ss3_fragment_boundary_yields_one_ordered_arrow() {
-    for introducer in [b'[', b'O'] {
+    for introducer in *b"[O" {
         for (final_byte, expected) in [
             (b'A', Event::Backward),
             (b'B', Event::Forward),

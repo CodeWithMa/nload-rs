@@ -136,9 +136,9 @@ impl SessionOps for LinuxTerminal {
             events: libc::POLLOUT,
             revents: 0,
         };
-        let milliseconds = timeout
-            .as_millis()
-            .saturating_add(u128::from(timeout.subsec_nanos() % 1_000_000 != 0));
+        let milliseconds = timeout.as_millis().saturating_add(u128::from(
+            !timeout.subsec_nanos().is_multiple_of(1_000_000),
+        ));
         let milliseconds = milliseconds.min(i32::MAX as u128) as i32;
         // SAFETY: one initialized pollfd and finite timeout.
         let result = cvt(unsafe { libc::poll(&mut fd, 1, milliseconds) })?;

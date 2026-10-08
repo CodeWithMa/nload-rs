@@ -205,7 +205,7 @@ struct Entry {
 }
 
 enum EntryState {
-    Run(Run),
+    Run(Box<Run>),
     Absent,
     ReadFailed,
 }
@@ -213,7 +213,7 @@ enum EntryState {
 impl EntryState {
     fn from_outcome(at: u64, outcome: CounterOutcome) -> Self {
         match outcome {
-            CounterOutcome::Readable(counters) => Self::Run(Run::new(at, counters)),
+            CounterOutcome::Readable(counters) => Self::Run(Box::new(Run::new(at, counters))),
             CounterOutcome::Absent => Self::Absent,
             CounterOutcome::ReadFailed => Self::ReadFailed,
         }

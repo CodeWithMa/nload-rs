@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 const SECOND: u64 = 1_000_000_000;
 type Log = Rc<RefCell<Vec<&'static str>>>;
+type WaitEffect = Box<dyn FnOnce(&ScriptedEffects)>;
 
 fn snapshot(entries: &[(&[u8], u64)]) -> Snapshot {
     let mut bytes = b"Inter-| Receive | Transmit\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n".to_vec();
@@ -67,7 +68,7 @@ struct Tick {
     notifications: Notifications,
     after_read: Option<u64>,
     dimensions: Option<(usize, usize)>,
-    on_wait: Option<Box<dyn FnOnce(&ScriptedEffects)>>,
+    on_wait: Option<WaitEffect>,
 }
 
 impl Tick {
@@ -419,7 +420,7 @@ fn output_tick(at: u64, write: Option<io::Result<usize>>) -> Tick {
     tick.on_wait = write.map(|result| {
         Box::new(move |effects: &ScriptedEffects| {
             effects.script.borrow_mut().writes.push_back(result);
-        }) as Box<dyn FnOnce(&ScriptedEffects)>
+        }) as WaitEffect
     });
     tick
 }

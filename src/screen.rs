@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Pure selected-monitor-view and dimensions to bounded ASCII screen rows.
+//! Pure selected-monitor-view and dimensions to an opaque, cell-bounded frame.
 //!
 //! Owns geometry, escaping, formatting, graph glyphs and small-terminal mode.
-//! Does not mutate the monitor or emit terminal escape sequences.
+//! Owns row encoding and default-style resets; terminal owns positioning, clearing
+//! and session commands. This prefactor retains the existing ASCII graph glyphs.
 
 use crate::monitor::{DirectionView, SelectedView, ViewState};
 
@@ -14,12 +15,64 @@ const GAP: usize = 2;
 const RATE_UNITS: [&str; 4] = ["Bit/s", "kBit/s", "MBit/s", "GBit/s"];
 const TOTAL_UNITS: [&str; 4] = ["Byte", "kByte", "MByte", "GByte"];
 
-/// Owned, printable ASCII rows, exactly `height` rows of `width` bytes each.
-/// No newlines, control bytes or terminal protocol; even zero dimensions are valid.
+/// Only screen construction can establish the logical cell bounds and row protocol.
+/// Encoded rows omit trailing blank cells but retain start/end and statistics resets.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Frame {
+    width: usize,
+    height: usize,
+    rows: Vec<String>,
+}
+
+impl Frame {
+    pub(crate) fn dimensions(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
+
+    pub(crate) fn encoded_rows(&self) -> &[String] {
+        &self.rows
+    }
+}
+
+#[derive(Clone)]
+struct Row {
+    cells: Vec<char>,
+    statistics: Option<usize>,
+}
+
+impl Row {
+    fn encode(self) -> String {
+        let end = self
+            .cells
+            .iter()
+            .rposition(|&cell| cell != ' ')
+            .map_or(0, |i| i + 1);
+        let mut encoded = String::from("\x1b[0m");
+        for (column, cell) in self.cells[..end].iter().enumerate() {
+            if self.statistics == Some(column) {
+                encoded.push_str("\x1b[0m");
+            }
+            encoded.push(*cell);
+        }
+        if self.statistics.is_some_and(|column| column >= end) {
+            encoded.push_str("\x1b[0m");
+        }
+        encoded.push_str("\x1b[0m");
+        encoded
+    }
+}
+
+/// Exactly `height` logical rows of `width` terminal cells, including zero sizes.
 /// Views come from Monitor (positive ceilings, finite nonnegative rates and paired
 /// availability invariants). Dimensions affect presentation only, never history.
-pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize) -> Vec<String> {
-    let mut rows = vec![vec![b' '; width]; height];
+pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize) -> Frame {
+    let mut rows = vec![
+        Row {
+            cells: vec![' '; width],
+            statistics: None
+        };
+        height
+    ];
     if width < MIN_WIDTH || height < MIN_HEIGHT {
         for (row, text) in rows.iter_mut().zip([
             "Terminal too small (need 60x16)".to_owned(),
@@ -33,16 +86,18 @@ pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize) -> Vec
         if let Some(text) = status(view.state) {
             put(&mut rows[1], 0, text);
         } else {
-            rows[1].fill(b'=');
+            rows[1].cells.fill('=');
         }
         let incoming_height = (height - 4) / 2;
         let outgoing_label = 3 + incoming_height;
         direction(&mut rows[2..outgoing_label], "Incoming", view.incoming);
         direction(&mut rows[outgoing_label..], "Outgoing", view.outgoing);
     }
-    rows.into_iter()
-        .map(|row| String::from_utf8(row).expect("screen rows contain only ASCII"))
-        .collect()
+    Frame {
+        width,
+        height,
+        rows: rows.into_iter().map(Row::encode).collect(),
+    }
 }
 
 fn status(state: ViewState) -> Option<&'static str> {
@@ -54,7 +109,7 @@ fn status(state: ViewState) -> Option<&'static str> {
     }
 }
 
-fn direction(rows: &mut [Vec<u8>], label: &str, view: DirectionView<'_>) {
+fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>) {
     // Ceilings are exact integer bytes/s, so use widened integer bit conversion.
     put(
         &mut rows[0],
@@ -66,7 +121,10 @@ fn direction(rows: &mut [Vec<u8>], label: &str, view: DirectionView<'_>) {
     );
     let graph = &mut rows[1..];
     let height = graph.len();
-    let graph_width = graph[0].len() - STAT_WIDTH - GAP;
+    let graph_width = graph[0].cells.len() - STAT_WIDTH - GAP;
+    for row in graph.iter_mut() {
+        row.statistics = Some(graph_width + GAP);
+    }
     let fitted = view.samples.len().min(graph_width);
     for (column, sample) in view
         .samples
@@ -83,18 +141,18 @@ fn direction(rows: &mut [Vec<u8>], label: &str, view: DirectionView<'_>) {
             // terminal dimensions are far below floating-point overflow here.
             height as f64 * sample.rate / ceiling
         };
-        for (row, cells) in graph.iter_mut().enumerate() {
-            let level = (height - 1 - row) as f64;
+        for (index, row) in graph.iter_mut().enumerate() {
+            let level = (height - 1 - index) as f64;
             // Compare against thresholds in whole-bar coordinates. Subtracting
             // the integer level first could turn exactly 1.70 into 0.69999… .
-            cells[graph_width - fitted + column] = if filled >= level + 1.0 {
-                b'#'
+            row.cells[graph_width - fitted + column] = if filled >= level + 1.0 {
+                '#'
             } else if filled >= level + 0.70 {
-                b'|'
+                '|'
             } else if filled >= level + 0.30 {
-                b'.'
+                '.'
             } else {
-                b' '
+                ' '
             };
         }
     }
@@ -126,9 +184,14 @@ fn direction(rows: &mut [Vec<u8>], label: &str, view: DirectionView<'_>) {
 }
 
 /// Copy already-safe ASCII, clipping only presentation strings, never numbers.
-fn put(row: &mut [u8], column: usize, text: &str) {
-    let count = text.len().min(row.len().saturating_sub(column));
-    row[column..column + count].copy_from_slice(&text.as_bytes()[..count]);
+fn put(row: &mut Row, column: usize, text: &str) {
+    for (cell, character) in row.cells.iter_mut().skip(column).zip(text.chars()) {
+        assert!(
+            character.is_ascii() && !character.is_ascii_control(),
+            "screen text must be safe ASCII"
+        );
+        *cell = character;
+    }
 }
 
 fn header(view: SelectedView<'_>, width: usize) -> String {
@@ -254,12 +317,55 @@ mod tests {
         }
     }
 
+    #[test]
+    fn opaque_frame_retains_dimensions_and_encodes_trimmed_default_rows() {
+        let history = samples(&[]);
+        let frame = super::render(view(&history), 60, 16);
+        assert_eq!(frame.dimensions(), (60, 16));
+        assert_eq!(frame.encoded_rows().len(), 16);
+        assert_eq!(
+            frame.encoded_rows()[0],
+            "\x1b[0mInterface eth0 (1/3)\x1b[0m"
+        );
+        assert_eq!(frame.encoded_rows()[3], "\x1b[0m\x1b[0m\x1b[0m");
+        assert_eq!(
+            frame.encoded_rows()[4],
+            format!("\x1b[0m{}\x1b[0mCurr: 1.00 kBit/s\x1b[0m", " ".repeat(32))
+        );
+        for (width, height) in [(0, 0), (0, 5), (80, 0)] {
+            let frame = super::render(view(&history), width, height);
+            assert_eq!(frame.dimensions(), (width, height));
+            assert_eq!(frame.encoded_rows(), vec!["\x1b[0m\x1b[0m"; height]);
+        }
+    }
+
     fn bounded(rows: &[String], width: usize, height: usize) {
         assert_eq!(rows.len(), height);
         for row in rows {
             assert_eq!(row.len(), width);
             assert!(row.bytes().all(|byte| (0x20..=0x7e).contains(&byte)));
         }
+    }
+
+    // Decode only the prefactor's reset subset through the read-only frame seam.
+    // The literal presentation oracles below remain independent of the encoder.
+    fn render(view: SelectedView<'_>, width: usize, height: usize) -> Vec<String> {
+        let frame = super::render(view, width, height);
+        assert_eq!(frame.dimensions(), (width, height));
+        assert_eq!(frame.encoded_rows().len(), height);
+        frame
+            .encoded_rows()
+            .iter()
+            .map(|encoded| {
+                assert!(encoded.starts_with("\x1b[0m"));
+                assert!(encoded.ends_with("\x1b[0m"));
+                let text = encoded.replace("\x1b[0m", "");
+                assert!(text.chars().all(|c| c.is_ascii() && !c.is_ascii_control()));
+                assert!(text.chars().count() <= width);
+                assert!(!text.ends_with(' '));
+                format!("{text:<width$}")
+            })
+            .collect()
     }
 
     fn stats(rows: &[String], end: usize, start: usize) -> Vec<&str> {

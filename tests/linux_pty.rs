@@ -13,10 +13,10 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 const LIMIT: Duration = Duration::from_secs(5);
-const START: &[u8] = b"\x1b[H\x1b[2J";
+const START: &[u8] = b"\x1b[0m\x1b[H\x1b[2J";
 const END: &[u8] = b"\x1b[H";
 const ENTER: &[u8] = b"\x1b[?1049h\x1b[?25l";
-const RESTORE: &[u8] = b"\x18\x1b[?25h\x18\x1b[?1049l";
+const RESTORE: &[u8] = b"\x18\x1b[0m\x18\x1b[?25h\x18\x1b[?1049l";
 
 fn checked(result: i32) -> i32 {
     assert!(result >= 0, "{}", io::Error::last_os_error());
@@ -221,6 +221,10 @@ impl Product {
         let deadline = Instant::now() + LIMIT;
         loop {
             while let Some(start) = find(&self.pending, START) {
+                assert!(
+                    start == 0 || &self.pending[..start] == ENTER,
+                    "unknown protocol before frame"
+                );
                 let body = start + START.len();
                 let Some(end) = find(&self.pending[body..], END).map(|offset| body + offset) else {
                     break;
@@ -294,33 +298,143 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-/// Validate the emitted row protocol, not visual emulator behavior. In
-/// particular, no LF/CR, unknown controls, row overflow or right-margin writes.
+#[test]
+fn decoder_counts_styled_braille_as_cells_and_preserves_default_text() {
+    let body = "\x1b[1;1H\x1b[0m\x1b[38;5;183m⢸⣿\x1b[0m  Curr: 1\x1b[0m\x1b[2;1H\x1b[0m\x1b[38;5;96m⡇\x1b[0m\x1b[0m";
+    assert_eq!(decode_rows(body.as_bytes(), 11, 2), ["⢸⣿  Curr: 1", "⡇"]);
+    assert_eq!(decode_rows(b"", 0, 3), ["", "", ""]);
+}
+
+#[test]
+fn decoder_rejects_unknown_protocol_style_leaks_and_cell_overflow() {
+    for body in [
+        "\x1b[+1;1H\x1b[0mx\x1b[0m",                // not a numeric CSI address
+        "\x1b[1;2H\x1b[0mx\x1b[0m",                 // unexpected column
+        "\x1b[2;1H\x1b[0mx\x1b[0m",                 // outside logical height
+        "\x1b[1;1H\x1b[0m\x1b[2J\x1b[0m",           // screen cannot clear
+        "\x1b[1;1H\x1b[0m\x1b[?25h\x1b[0m",         // screen cannot change session
+        "\x1b[1;1H\x1b[0m\x1b[31m⣿\x1b[0m",         // unsupported SGR
+        "\x1b[1;1H\x1b[0m\x1b[38;5;1m⣿\x1b[0m",     // outside palette
+        "\x1b[1;1H\x1b[0m\x1b[48;5;60m⣿\x1b[0m",    // background
+        "\x1b[1;1H\x1b[0m\x1b[38;5;60mCurr\x1b[0m", // styled text
+        "\x1b[1;1H\x1b[0m\x1b[38;5;60m \x1b[0m",    // styled blank
+        "\x1b[1;1H\x1b[0m⣿\x1b[0m",                 // unstyled Braille
+        "\x1b[1;1H\x1b[0m\x1b[38;5;60m⠀\x1b[0m",    // U+2800
+        "\x1b[1;1H\x1b[0mé\x1b[0m",                 // arbitrary Unicode
+        "\x1b[1;1H\x1b[0mx\n\x1b[0m",
+        "\x1b[1;1H\x1b[0mx\r\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x07\x1b[0m",
+        "\x1b[1;1Hx\x1b[0m",                      // missing row-start reset
+        "\x1b[1;1H\x1b[0mx",                      // missing final reset
+        "\x1b[1;1H\x1b[0m\x1b[38;5;60m⣿⢸\x1b[0m", // two cells in width one
+    ] {
+        assert!(
+            std::panic::catch_unwind(|| decode_rows(body.as_bytes(), 1, 1)).is_err(),
+            "accepted {body:?}"
+        );
+    }
+    for index in [60, 61, 98, 140, 146, 183, 96, 132, 133, 170, 176, 219] {
+        let body = format!("\x1b[1;1H\x1b[0m\x1b[38;5;{index}m⣿\x1b[0m");
+        assert_eq!(decode_rows(body.as_bytes(), 1, 1), ["⣿"]);
+    }
+}
+
+/// Validate protocol rather than visual appearance. This is deliberately a
+/// whitelist, not a general ANSI stripper: SGR is zero-width, allowed Braille
+/// consumes one cell, and all other controls/Unicode/escapes are rejected.
 fn decode_rows(mut bytes: &[u8], width: usize, height: usize) -> Vec<String> {
     let mut rows = vec![String::new(); height];
+    let mut next_row = 1;
     while !bytes.is_empty() {
-        assert!(bytes.starts_with(b"\x1b["));
-        let final_h = bytes.iter().position(|&byte| byte == b'H').unwrap();
-        let address = std::str::from_utf8(&bytes[2..final_h]).unwrap();
+        let (address, command, rest) = csi(bytes);
+        assert_eq!(command, b'H');
         let (row, column) = address.split_once(';').unwrap();
+        assert!(!row.is_empty() && row.bytes().all(|byte| byte.is_ascii_digit()));
         let row = row.parse::<usize>().unwrap();
         assert_eq!(column, "1");
         assert!((1..=height).contains(&row));
-        bytes = &bytes[final_h + 1..];
-        let length = bytes
-            .iter()
-            .position(|&byte| byte == 27)
-            .unwrap_or(bytes.len());
-        assert!(length <= width);
+        assert_eq!(row, next_row);
+        next_row += 1;
+        bytes = rest;
         assert!(
-            bytes[..length]
-                .iter()
-                .all(|byte| (b' '..=b'~').contains(byte))
+            bytes.starts_with(b"\x1b[0m"),
+            "row must start in default style"
         );
-        rows[row - 1] = std::str::from_utf8(&bytes[..length]).unwrap().to_owned();
-        bytes = &bytes[length..];
+        let mut foreground = false;
+        let mut final_reset = false;
+        let mut cells = 0;
+        while !bytes.is_empty() {
+            if bytes[0] == 27 {
+                let (parameters, command, rest) = csi(bytes);
+                if command == b'H' {
+                    break;
+                }
+                assert_eq!(command, b'm', "unknown row command");
+                if parameters == "0" {
+                    foreground = false;
+                    final_reset = true;
+                } else {
+                    assert!(
+                        matches!(
+                            parameters,
+                            "38;5;60"
+                                | "38;5;61"
+                                | "38;5;98"
+                                | "38;5;140"
+                                | "38;5;146"
+                                | "38;5;183"
+                                | "38;5;96"
+                                | "38;5;132"
+                                | "38;5;133"
+                                | "38;5;170"
+                                | "38;5;176"
+                                | "38;5;219"
+                        ),
+                        "unknown SGR: {parameters}"
+                    );
+                    foreground = true;
+                    final_reset = false;
+                }
+                bytes = rest;
+            } else {
+                let end = bytes
+                    .iter()
+                    .position(|&byte| byte == 27)
+                    .unwrap_or(bytes.len());
+                let text = std::str::from_utf8(&bytes[..end]).unwrap();
+                for character in text.chars() {
+                    if ('\u{2801}'..='\u{28ff}').contains(&character) {
+                        assert!(foreground, "Braille needs a palette foreground");
+                    } else {
+                        assert!(
+                            (' '..='~').contains(&character),
+                            "unknown display character"
+                        );
+                        assert!(!foreground, "text and spaces must use default style");
+                    }
+                    cells += 1;
+                    assert!(cells <= width, "row exceeds terminal-cell width");
+                    rows[row - 1].push(character);
+                }
+                final_reset = false;
+                bytes = &bytes[end..];
+            }
+        }
+        assert!(final_reset, "row must end with reset");
     }
+    assert_eq!(next_row - 1, if width == 0 { 0 } else { height });
     rows
+}
+
+fn csi(bytes: &[u8]) -> (&str, u8, &[u8]) {
+    assert!(bytes.starts_with(b"\x1b["), "unknown escape");
+    let end = bytes[2..]
+        .iter()
+        .position(|byte| (0x40..=0x7e).contains(byte))
+        .unwrap()
+        + 2;
+    let parameters = std::str::from_utf8(&bytes[2..end]).unwrap();
+    (parameters, bytes[end], &bytes[end + 1..])
 }
 
 fn position(rows: &[String]) -> (usize, usize) {

@@ -16,9 +16,13 @@ human visual observations.
 
 ## Decisions so far
 
-No implementation tickets resolved yet.
+- [Prefactor screen output into an opaque, cell-bounded frame](issues/01-opaque-cell-bounded-frame.md#resolution--2026-10-08--implementer-01-opencode): screen-owned logical cells and reset-hygienic rows now cross the opaque frame seam; runtime positioning, staged cleanup and strict PTY decoding pass with the inherited ASCII presentation.
 
 ## Evidence
 
 Implementation agents record actual commands, outcomes, and case mappings
 with their ticket resolutions. Unperformed checks remain pending.
+
+- [Ticket 01 — opaque cell-bounded ASCII prefactor evidence](01-evidence.md):
+  test-first execution, all seven criteria, 97 unit + 13 PTY/decoder tests and
+  passing formatting/locked-test/release-build gates.

@@ -87,6 +87,7 @@ impl SessionOps for ScriptSession {
         let name = match bytes {
             super::ENTER_SCREEN => "enter",
             super::HIDE_CURSOR => "hide",
+            super::RESET_STYLE => "reset",
             super::SHOW_CURSOR => "show",
             super::LEAVE_SCREEN => "leave",
             _ => "write",

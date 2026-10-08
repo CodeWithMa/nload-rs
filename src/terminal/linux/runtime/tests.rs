@@ -193,7 +193,23 @@ fn real_nonblocking_backpressure_does_not_hide_input_signal_or_timer_readiness()
     write(&signal_writer, b"not signal identities").unwrap();
     flags.store(true, std::sync::atomic::Ordering::SeqCst);
     let mut runtime = Runtime::new(LinuxRuntime::new(&mut terminal, &mut clock));
-    runtime.queue_frame(&["latest".into()], 6, 1).unwrap();
+    let monitor = crate::monitor::Monitor::new(
+        crate::proc_sampler::StartupSelection {
+            names: vec![b"eth0".to_vec()],
+            selected: 0,
+        },
+        crate::arguments::Ceilings::default(),
+        0,
+        |_| {
+            crate::proc_sampler::CounterOutcome::Readable(crate::proc_sampler::Counters {
+                incoming: 0,
+                outgoing: 0,
+            })
+        },
+    );
+    runtime
+        .queue_frame(&crate::screen::render(monitor.selected_view(), 60, 16))
+        .unwrap();
     runtime.output_batch().unwrap(); // Actual EAGAIN, no wait.
     let ready = runtime.wait(future).unwrap();
     assert_eq!(

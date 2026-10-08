@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 //! Startup orchestration and the single-threaded sampling/redraw loop.
-//! Effects stay in the counter, clock and terminal adapters; statistics and rows
+//! Effects stay in the counter, clock and terminal adapters; statistics and frames
 //! remain pure. The same orchestration runs with scripted adapters in tests.
 
 use std::ffi::OsString;
@@ -225,8 +225,8 @@ fn drive<C: CounterSource, O: RuntimeEffects>(
         }
         resized |= notifications.resized;
         if dirty {
-            let rows = screen::render(monitor.selected_view(), dimensions.0, dimensions.1);
-            if runtime.queue_frame(&rows, dimensions.0, dimensions.1)? {
+            let frame = screen::render(monitor.selected_view(), dimensions.0, dimensions.1);
+            if runtime.queue_frame(&frame)? {
                 dirty = false;
             }
         }

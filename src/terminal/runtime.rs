@@ -43,7 +43,7 @@ pub(crate) trait RuntimeEffects: Clock {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize>;
 }
 
-struct Frame {
+struct PendingOutput {
     bytes: Vec<u8>,
     emitted: usize,
 }
@@ -52,7 +52,7 @@ struct Frame {
 pub(crate) struct Runtime<O> {
     effects: O,
     decoder: Decoder,
-    frame: Option<Frame>,
+    frame: Option<PendingOutput>,
     previous_time: Option<u64>,
 }
 
@@ -116,36 +116,25 @@ impl<O: RuntimeEffects> Runtime<O> {
 
     /// False means an emitted frame must finish: leave the application's latest
     /// redraw request dirty, and render the latest view after that frame finishes.
+    /// Screen alone establishes bounds and row encoding. Copy its encoded rows
+    /// verbatim; only clearing, positioning and resumable byte offsets live here.
     /// This owns exactly one frame, not a queue of already stale views.
-    pub(crate) fn queue_frame(
-        &mut self,
-        rows: &[String],
-        width: usize,
-        height: usize,
-    ) -> io::Result<bool> {
+    pub(crate) fn queue_frame(&mut self, frame: &crate::screen::Frame) -> io::Result<bool> {
         if self.frame.as_ref().is_some_and(|frame| frame.emitted != 0) {
             return Ok(false);
         }
-        if rows.len() > height
-            || rows.iter().any(|row| {
-                row.len() > width || !row.bytes().all(|byte| (b' '..=b'~').contains(&byte))
-            })
-        {
-            return Err(io::Error::other(
-                "frame rows exceed dimensions or contain nonprintable bytes",
-            ));
-        }
+        let (width, _) = frame.dimensions();
         // No LF/CR and no character beyond the supplied right margin. Absolute
         // positioning cancels delayed autowrap without changing terminal modes.
-        let mut bytes = b"\x1b[H\x1b[2J".to_vec();
+        let mut bytes = b"\x1b[0m\x1b[H\x1b[2J".to_vec();
         if width != 0 {
-            for (index, row) in rows.iter().enumerate() {
+            for (index, row) in frame.encoded_rows().iter().enumerate() {
                 bytes.extend_from_slice(format!("\x1b[{};1H", index + 1).as_bytes());
-                bytes.extend_from_slice(row.trim_end_matches(' ').as_bytes());
+                bytes.extend_from_slice(row.as_bytes());
             }
         }
         bytes.extend_from_slice(b"\x1b[H");
-        self.frame = Some(Frame { bytes, emitted: 0 });
+        self.frame = Some(PendingOutput { bytes, emitted: 0 });
         Ok(true)
     }
 

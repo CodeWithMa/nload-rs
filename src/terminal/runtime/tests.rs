@@ -3,6 +3,71 @@
 use super::scripted::{Call, ScriptedEffects};
 use super::*;
 
+fn frame(name: &[u8], width: usize, height: usize) -> crate::screen::Frame {
+    use crate::arguments::Ceilings;
+    use crate::monitor::Monitor;
+    use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
+    let monitor = Monitor::new(
+        StartupSelection {
+            names: vec![name.to_vec()],
+            selected: 0,
+        },
+        Ceilings::default(),
+        0,
+        |_| {
+            CounterOutcome::Readable(Counters {
+                incoming: 0,
+                outgoing: 0,
+            })
+        },
+    );
+    crate::screen::render(monitor.selected_view(), width, height)
+}
+
+#[test]
+fn screen_frames_clear_in_default_style_and_keep_row_resets_and_cell_bounds() {
+    let effects = ScriptedEffects::default();
+    let mut runtime = Runtime::new(effects.clone());
+    for (width, height, expected) in [
+        (1, 1, "\x1b[0m\x1b[H\x1b[2J\x1b[1;1H\x1b[0mT\x1b[0m\x1b[H"),
+        (0, 5, "\x1b[0m\x1b[H\x1b[2J\x1b[H"),
+        (80, 0, "\x1b[0m\x1b[H\x1b[2J\x1b[H"),
+    ] {
+        effects.script.borrow_mut().emitted.clear();
+        assert!(
+            runtime
+                .queue_frame(&frame(b"eth\x1b[31m", width, height))
+                .unwrap()
+        );
+        runtime.output_batch().unwrap();
+        assert_eq!(effects.script.borrow().emitted, expected.as_bytes());
+    }
+}
+
+#[test]
+fn every_prefactor_protocol_byte_boundary_resumes_exactly_without_interleaving() {
+    let expected = b"\x1b[0m\x1b[H\x1b[2J\x1b[1;1H\x1b[0mT\x1b[0m\x1b[H";
+    for split in 1..expected.len() {
+        let effects = ScriptedEffects::default();
+        let mut runtime = Runtime::new(effects.clone());
+        runtime.queue_frame(&frame(b"eth0", 1, 1)).unwrap();
+        effects.script.borrow_mut().writes.push_back(Ok(split));
+        runtime.output_batch().unwrap();
+        assert_eq!(effects.script.borrow().emitted, expected[..split]);
+        assert!(!runtime.queue_frame(&frame(b"latest", 60, 16)).unwrap());
+        effects
+            .script
+            .borrow_mut()
+            .writes
+            .push_back(Err(io::ErrorKind::WouldBlock.into()));
+        runtime.output_batch().unwrap();
+        assert_eq!(feed(&mut runtime, &effects, b"\x1b[C", 0), [Event::Forward]);
+        runtime.output_batch().unwrap();
+        assert!(!runtime.has_pending_output());
+        assert_eq!(effects.script.borrow().emitted, expected);
+    }
+}
+
 fn feed(
     runtime: &mut Runtime<ScriptedEffects>,
     effects: &ScriptedEffects,
@@ -217,37 +282,37 @@ fn sustained_input_and_overlong_sequences_are_bounded_and_discarded() {
 fn untouched_frames_replace_but_partial_frames_finish_without_duplicate_bytes() {
     let effects = ScriptedEffects::default();
     let mut runtime = Runtime::new(effects.clone());
-    runtime.queue_frame(&["obsolete".into()], 8, 1).unwrap();
+    runtime.queue_frame(&frame(b"obsolete", 32, 2)).unwrap();
     effects
         .script
         .borrow_mut()
         .writes
         .push_back(Err(io::ErrorKind::WouldBlock.into()));
     runtime.output_batch().unwrap();
-    assert!(runtime.queue_frame(&["current".into()], 8, 1).unwrap());
+    assert!(runtime.queue_frame(&frame(b"current", 32, 2)).unwrap());
     effects.script.borrow_mut().writes.push_back(Ok(2));
     runtime.output_batch().unwrap();
-    assert!(!runtime.queue_frame(&["latest".into()], 8, 1).unwrap());
+    assert!(!runtime.queue_frame(&frame(b"latest", 32, 2)).unwrap());
     effects
         .script
         .borrow_mut()
         .writes
         .push_back(Err(io::ErrorKind::Interrupted.into()));
     runtime.output_batch().unwrap();
-    assert!(!runtime.queue_frame(&["latest".into()], 8, 1).unwrap());
+    assert!(!runtime.queue_frame(&frame(b"latest", 32, 2)).unwrap());
     effects.script.borrow_mut().writes.push_back(Ok(3));
     runtime.output_batch().unwrap();
     runtime.output_batch().unwrap();
     assert!(!runtime.has_pending_output());
     assert_eq!(
         effects.script.borrow().emitted,
-        b"\x1b[H\x1b[2J\x1b[1;1Hcurrent\x1b[H"
+        b"\x1b[0m\x1b[H\x1b[2J\x1b[1;1H\x1b[0mTerminal too small (need 60x16)\x1b[0m\x1b[2;1H\x1b[0mInterface current (1/1)\x1b[0m\x1b[H"
     );
-    assert!(runtime.queue_frame(&["latest".into()], 8, 1).unwrap());
+    assert!(runtime.queue_frame(&frame(b"latest", 32, 2)).unwrap());
     runtime.output_batch().unwrap();
     assert_eq!(
         effects.script.borrow().emitted,
-        b"\x1b[H\x1b[2J\x1b[1;1Hcurrent\x1b[H\x1b[H\x1b[2J\x1b[1;1Hlatest\x1b[H"
+        b"\x1b[0m\x1b[H\x1b[2J\x1b[1;1H\x1b[0mTerminal too small (need 60x16)\x1b[0m\x1b[2;1H\x1b[0mInterface current (1/1)\x1b[0m\x1b[H\x1b[0m\x1b[H\x1b[2J\x1b[1;1H\x1b[0mTerminal too small (need 60x16)\x1b[0m\x1b[2;1H\x1b[0mInterface latest (1/1)\x1b[0m\x1b[H"
     );
 }
 
@@ -255,7 +320,7 @@ fn untouched_frames_replace_but_partial_frames_finish_without_duplicate_bytes() 
 fn backpressure_keeps_clock_input_signals_resize_and_timer_effects_available() {
     let effects = ScriptedEffects::default();
     let mut runtime = Runtime::new(effects.clone());
-    runtime.queue_frame(&["frame".into()], 5, 1).unwrap();
+    runtime.queue_frame(&frame(b"eth0", 60, 16)).unwrap();
     for time in [0, 500_000_000, 1_000_000_000] {
         effects.clock.0.borrow_mut().time = time;
         effects
@@ -312,24 +377,18 @@ fn backpressure_keeps_clock_input_signals_resize_and_timer_effects_available() {
 }
 
 #[test]
-fn output_batches_are_finite_and_frames_reject_out_of_bounds_protocol_injection() {
+fn output_batches_are_finite_for_screen_constructed_frames() {
     let effects = ScriptedEffects::default();
     let mut runtime = Runtime::new(effects.clone());
-    for rows in [
-        vec!["1234".into()],
-        vec!["x".into(), "y".into()],
-        vec!["\x1b".into()],
-        vec!["é".into()],
-        vec!["x\n".into()],
-    ] {
-        assert!(runtime.queue_frame(&rows, 3, 1).is_err());
-    }
-    runtime.queue_frame(&[], 0, 0).unwrap();
+    runtime.queue_frame(&frame(b"eth0", 0, 0)).unwrap();
     runtime.output_batch().unwrap();
-    assert_eq!(effects.script.borrow().emitted, b"\x1b[H\x1b[2J\x1b[H");
+    assert_eq!(
+        effects.script.borrow().emitted,
+        b"\x1b[0m\x1b[H\x1b[2J\x1b[H"
+    );
     effects.script.borrow_mut().emitted.clear();
     runtime
-        .queue_frame(&["x".repeat(20_000), "y ".into()], 20_000, 2)
+        .queue_frame(&frame(&vec![b'x'; 20_000], 20_030, 2))
         .unwrap();
     runtime.output_batch().unwrap();
     assert_eq!(effects.script.borrow().emitted.len(), 16 * 1024);
@@ -341,7 +400,7 @@ fn output_batches_are_finite_and_frames_reject_out_of_bounds_protocol_injection(
             .script
             .borrow()
             .emitted
-            .ends_with(b"\x1b[2;1Hy\x1b[H")
+            .ends_with(b" (1/1)\x1b[0m\x1b[H")
     );
 }
 
@@ -372,7 +431,9 @@ fn input_eof_and_effect_faults_are_fatal_while_transient_io_yields() {
         io::ErrorKind::BrokenPipe
     );
     for result in [Ok(0), Ok(usize::MAX), Err(io::ErrorKind::BrokenPipe.into())] {
-        runtime.queue_frame(&["x".into()], 1, 1).unwrap();
+        // Each fatal result has its own owner: a started frame cannot be replaced.
+        let mut runtime = Runtime::new(effects.clone());
+        runtime.queue_frame(&frame(b"eth0", 1, 1)).unwrap();
         effects.script.borrow_mut().writes.push_back(result);
         assert!(runtime.output_batch().is_err());
     }

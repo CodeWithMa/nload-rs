@@ -320,6 +320,7 @@ impl Harness {
     }
     fn restored(&self) {
         assert!(self.session.state.borrow().calls.ends_with(&[
+            "reset",
             "show",
             "leave",
             "restore-termios",
@@ -755,7 +756,7 @@ fn backpressure_and_partial_frames_preserve_sampling_and_latest_redraw() {
     let old = emitted.find("Interface b").unwrap();
     let latest = emitted.find("Interface c").unwrap();
     assert!(old < latest);
-    assert_eq!(emitted.matches("\x1b[H\x1b[2J").count(), 2);
+    assert_eq!(emitted.matches("\x1b[0m\x1b[H\x1b[2J").count(), 2);
     assert_eq!(h.view.as_ref().unwrap().samples, [(SAMPLE_NS, 300.0)]);
     h.restored();
 }

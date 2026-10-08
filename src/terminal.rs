@@ -3,7 +3,8 @@
 //! Linux terminal/runtime adapters and normalized terminal events.
 //!
 //! Owns terminal FDs, BOOTTIME/timerfd, signal notifications, incremental input,
-//! nonblocking output and staged restoration. Unsafe Linux calls stay inside
+//! nonblocking output, default-style clearing/absolute positioning of opaque
+//! screen frames, and staged restoration (including SGR reset). Unsafe calls stay inside
 //! concrete adapters. The thin application loop connects these effects to pure
 //! modules. Session restoration also covers incomplete initialization.
 

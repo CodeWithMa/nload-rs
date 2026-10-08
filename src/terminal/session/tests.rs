@@ -147,6 +147,7 @@ impl SessionOps for Script {
         self.write_kind = match bytes {
             ENTER_SCREEN => "enter",
             HIDE_CURSOR => "hide",
+            b"\x18\x1b[0m" => "reset",
             SHOW_CURSOR => "show",
             LEAVE_SCREEN => "leave",
             _ => self.write_kind,
@@ -200,6 +201,7 @@ fn assert_restored(state: &Rc<RefCell<State>>) {
 }
 
 const RESTORE: &[&str] = &[
+    "reset",
     "show",
     "leave",
     "restore-termios",
@@ -207,6 +209,28 @@ const RESTORE: &[&str] = &[
     "restore-output",
     "release",
 ];
+
+#[test]
+fn explicit_and_drop_cleanup_cancel_partial_sgr_and_reset_before_screen_restoration() {
+    for explicit in [true, false] {
+        let (mut session, state) = Script::new();
+        session.initialize().unwrap();
+        state.borrow_mut().emitted.extend_from_slice(b"\x1b[38;5;");
+        state.borrow_mut().log.clear();
+        if explicit {
+            assert!(session.cleanup().is_empty());
+        }
+        drop(session);
+        assert!(
+            state
+                .borrow()
+                .emitted
+                .ends_with(b"\x1b[38;5;\x18\x1b[0m\x18\x1b[?25h\x18\x1b[?1049l")
+        );
+        assert_eq!(&state.borrow().log[..3], ["reset", "show", "leave"]);
+        assert_restored(&state);
+    }
+}
 
 #[test]
 fn support_rejects_each_stream_and_term_before_snapshot_or_mutation() {
@@ -264,7 +288,14 @@ fn ownership_snapshot_and_notifications_precede_every_mutation() {
     assert_restored(&state);
     assert_eq!(
         state.borrow().emitted,
-        [ENTER_SCREEN, HIDE_CURSOR, SHOW_CURSOR, LEAVE_SCREEN].concat()
+        [
+            ENTER_SCREEN,
+            HIDE_CURSOR,
+            RESET_STYLE,
+            SHOW_CURSOR,
+            LEAVE_SCREEN
+        ]
+        .concat()
     );
     let old_log = state.borrow().log.clone();
     assert!(session.cleanup().is_empty());
@@ -284,7 +315,7 @@ fn existing_nonblocking_flags_are_preserved_without_claiming_changes() {
     assert!(session.cleanup().is_empty());
     assert_eq!(
         state.borrow().log,
-        ["show", "leave", "restore-termios", "release"]
+        ["reset", "show", "leave", "restore-termios", "release"]
     );
     assert_eq!(state.borrow().input_flags, INPUT_FLAGS | libc::O_NONBLOCK);
     assert_eq!(state.borrow().output_flags, OUTPUT_FLAGS | libc::O_NONBLOCK);
@@ -322,6 +353,7 @@ fn every_initialization_failure_restores_only_applicable_attempted_effects() {
         (
             "enter",
             &[
+                "reset",
                 "leave",
                 "restore-termios",
                 "restore-input",
@@ -483,7 +515,7 @@ fn multiple_cleanup_failures_preserve_selected_status_and_attempt_every_operatio
                 .iter()
                 .filter(|error| error.starts_with("terminal cleanup:"))
                 .count(),
-            5
+            6
         );
         assert!(!state.borrow().registered);
         let log = state.borrow().log.clone();
@@ -505,6 +537,7 @@ fn cleanup_backpressure_is_bounded_and_does_not_skip_os_restoration() {
     assert_eq!(
         state.borrow().log,
         [
+            "reset",
             "show",
             "show",
             "wait",
@@ -536,7 +569,7 @@ fn drop_during_unwinding_survives_an_additional_restoration_panic() {
     let result = catch_unwind(AssertUnwindSafe(|| {
         session.initialize().unwrap();
         state.borrow_mut().log.clear();
-        fault(&state, "show", &[Step::Panic]);
+        fault(&state, "reset", &[Step::Panic]);
         let _owner = session;
         panic!("unwind through session owner");
     }));
@@ -568,14 +601,21 @@ fn interrupted_cleanup_wait_resumes_within_the_same_bounded_write() {
     session.initialize().unwrap();
     fault(
         &state,
-        "show",
+        "reset",
         &[Step::WouldBlock, Step::Short(2), Step::WouldBlock],
     );
     fault(&state, "wait", &[Step::Interrupted]);
     assert!(session.cleanup().is_empty());
     assert_eq!(
         state.borrow().emitted,
-        [ENTER_SCREEN, HIDE_CURSOR, SHOW_CURSOR, LEAVE_SCREEN].concat()
+        [
+            ENTER_SCREEN,
+            HIDE_CURSOR,
+            RESET_STYLE,
+            SHOW_CURSOR,
+            LEAVE_SCREEN
+        ]
+        .concat()
     );
     assert_restored(&state);
 }

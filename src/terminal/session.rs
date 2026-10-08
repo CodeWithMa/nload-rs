@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 pub(super) const ENTER_SCREEN: &[u8] = b"\x1b[?1049h";
 pub(super) const HIDE_CURSOR: &[u8] = b"\x1b[?25l";
 // CAN cancels a possibly unfinished control sequence before restoration.
+pub(super) const RESET_STYLE: &[u8] = b"\x18\x1b[0m";
 pub(super) const SHOW_CURSOR: &[u8] = b"\x18\x1b[?25h";
 pub(super) const LEAVE_SCREEN: &[u8] = b"\x18\x1b[?1049l";
 const CLEANUP_WRITE_BUDGET: Duration = Duration::from_millis(100);
@@ -75,6 +76,7 @@ struct Stages {
     output_flags: bool,
     screen: bool,
     cursor: bool,
+    style: bool,
 }
 
 /// Own before initialization and retain until `guarded` has cleaned up. Attempts
@@ -123,6 +125,9 @@ impl<O: SessionOps> Session<O> {
         }
         let dimensions = self.ops.dimensions()?;
         self.stages.screen = true;
+        // Even a partial session command can leave an incomplete escape. From
+        // this point cleanup owns cancel/reset, including later runtime output.
+        self.stages.style = true;
         write_sequence(&mut self.ops, ENTER_SCREEN, None)?;
         self.stages.cursor = true;
         write_sequence(&mut self.ops, HIDE_CURSOR, None)?;
@@ -149,6 +154,11 @@ impl<O: SessionOps> Session<O> {
     /// consumed, even on failure; Drop is for paths missing explicit cleanup.
     pub(crate) fn cleanup(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
+        if std::mem::take(&mut self.stages.style) {
+            restoration(&mut errors, "reset styling", || {
+                write_sequence(&mut self.ops, RESET_STYLE, Some(CLEANUP_WRITE_BUDGET))
+            });
+        }
         if std::mem::take(&mut self.stages.cursor) {
             restoration(&mut errors, "show cursor", || {
                 write_sequence(&mut self.ops, SHOW_CURSOR, Some(CLEANUP_WRITE_BUDGET))

@@ -197,6 +197,7 @@ fn real_nonblocking_backpressure_does_not_hide_input_signal_or_timer_readiness()
         crate::proc_sampler::StartupSelection {
             names: vec![b"eth0".to_vec()],
             selected: 0,
+            pending_request: None,
         },
         crate::arguments::Ceilings::default(),
         0,

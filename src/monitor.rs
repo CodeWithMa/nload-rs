@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Pure traffic statistics, fixed interface membership and navigation.
+//! Pure traffic statistics, retained interface membership and navigation.
 //!
 //! Owns statistics runs, availability, exact deltas, windows, extrema and history.
 //! Exposes selected read-only views; performs no I/O, clock reads or sizing.
@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 
 use crate::arguments::Ceilings;
-use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
+use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection, natural_order};
 
 const SECOND_NS: u64 = 1_000_000_000;
 const HISTORY_NS: u64 = 300 * SECOND_NS;
@@ -51,7 +51,7 @@ pub(crate) struct DirectionView<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SelectedView<'a> {
     pub(crate) name: &'a [u8],
-    /// One-based header position in the fixed startup list.
+    /// One-based header position in the naturally sorted retained collection.
     pub(crate) position: usize,
     pub(crate) count: usize,
     pub(crate) state: ViewState,
@@ -59,11 +59,12 @@ pub(crate) struct SelectedView<'a> {
     pub(crate) outgoing: DirectionView<'a>,
 }
 
-/// One bulk round calls the supplied outcome lookup for every retained name.
+/// One bulk round discovers new names and observes every retained entry.
 /// Neither construction nor observation knows about proc, clocks or dimensions.
 pub(crate) struct Monitor {
     entries: Vec<Entry>,
     selected: usize,
+    pending_request: Option<Vec<u8>>,
     ceilings: Ceilings,
     latest_at: u64,
 }
@@ -90,6 +91,7 @@ impl Monitor {
                 })
                 .collect(),
             selected: startup.selected,
+            pending_request: startup.pending_request,
             ceilings,
             latest_at: at,
         }
@@ -97,8 +99,16 @@ impl Monitor {
 
     /// Accept one completion-timestamped round. Equal/earlier times are ignored
     /// entirely (including failure/decrease outcomes); no lookup or state change.
+    /// Supply all names from a validated successful snapshot, or none on failure.
     /// The lookup should use `proc_sampler::counter_outcome(&round, name)`.
-    pub(crate) fn observe(&mut self, at: u64, mut outcome: impl FnMut(&[u8]) -> CounterOutcome) {
+    /// Additions preserve selected identity unless they fulfill a pending startup
+    /// request, which is consumed once and is not cancelled by navigation.
+    pub(crate) fn observe<'a>(
+        &mut self,
+        at: u64,
+        names: impl IntoIterator<Item = &'a [u8]>,
+        mut outcome: impl FnMut(&[u8]) -> CounterOutcome,
+    ) {
         if at <= self.latest_at {
             return;
         }
@@ -108,6 +118,31 @@ impl Monitor {
                     run.observe(at, counters);
                 }
                 (state, outcome) => *state = EntryState::from_outcome(at, outcome),
+            }
+        }
+        for name in names {
+            let index = match self
+                .entries
+                .binary_search_by(|entry| natural_order(&entry.name, name))
+            {
+                Ok(index) => index,
+                Err(index) => {
+                    self.entries.insert(
+                        index,
+                        Entry {
+                            name: name.to_vec(),
+                            state: EntryState::from_outcome(at, outcome(name)),
+                        },
+                    );
+                    if index <= self.selected {
+                        self.selected += 1;
+                    }
+                    index
+                }
+            };
+            if self.pending_request.as_deref() == Some(name) {
+                self.selected = index;
+                self.pending_request = None;
             }
         }
         self.latest_at = at;
@@ -317,6 +352,7 @@ mod tests {
             StartupSelection {
                 names: vec![b"eth0".to_vec()],
                 selected: 0,
+                pending_request: None,
             },
             Ceilings::default(),
             at,
@@ -325,7 +361,7 @@ mod tests {
     }
 
     fn observe(monitor: &mut Monitor, at: u64, incoming: u64, outgoing: u64) {
-        monitor.observe(at, |_| readable(incoming, outgoing));
+        monitor.observe(at, [], |_| readable(incoming, outgoing));
     }
 
     fn close(actual: f64, expected: f64) {
@@ -445,9 +481,17 @@ mod tests {
 
     #[test]
     fn nonpositive_times_ignore_entire_outcomes_without_advancing_any_view() {
-        let mut monitor = single(10 * SECOND_NS, 1000, 2000);
+        let initial = Ok(snapshot(&[(b"eth0", 1000, 2000)]));
+        let mut monitor = Monitor::new(
+            initial.as_ref().unwrap().startup(Some(b"wg0")).unwrap(),
+            Ceilings::default(),
+            10 * SECOND_NS,
+            |name| counter_outcome(&initial, name),
+        );
         for at in [10 * SECOND_NS, 9 * SECOND_NS] {
-            monitor.observe(at, |_| panic!("ignored baseline round was consulted"));
+            monitor.observe(at, [b"eth1".as_slice(), b"wg0"], |_| {
+                panic!("ignored baseline round was consulted")
+            });
             baseline(monitor.selected_view(), 1000, 2000);
         }
         observe(&mut monitor, 11 * SECOND_NS, 1100, 2200);
@@ -458,7 +502,7 @@ mod tests {
                 CounterOutcome::Absent,
                 CounterOutcome::ReadFailed,
             ] {
-                monitor.observe(at, |_| outcome);
+                monitor.observe(at, [b"eth1".as_slice(), b"wg0"], |_| outcome);
                 assert_eq!(saved(monitor.selected_view()), before);
             }
         }
@@ -466,11 +510,36 @@ mod tests {
         let view = monitor.selected_view();
         rates(view.incoming, [300.0, 200.0, 100.0, 300.0]);
         assert_eq!(view.incoming.samples.len(), 2);
-        monitor.observe(13 * SECOND_NS, |_| CounterOutcome::Absent);
-        monitor.observe(13 * SECOND_NS, |_| readable(5000, 6000));
+        monitor.observe(13 * SECOND_NS, [], |_| CounterOutcome::Absent);
+        monitor.observe(13 * SECOND_NS, [], |_| readable(5000, 6000));
         unavailable(monitor.selected_view(), ViewState::Absent);
         observe(&mut monitor, 14 * SECOND_NS, 5000, 6000);
         baseline(monitor.selected_view(), 5000, 6000);
+        let before = saved(monitor.selected_view());
+        let appeared = Ok(snapshot(&[
+            (b"eth0", 5100, 6200),
+            (b"eth1", 0, 0),
+            (b"wg0", 9000, 10000),
+        ]));
+        for at in [14 * SECOND_NS, 13 * SECOND_NS] {
+            monitor.observe(
+                at,
+                appeared.iter().flat_map(|snapshot| snapshot.names()),
+                |name| counter_outcome(&appeared, name),
+            );
+            assert_eq!(saved(monitor.selected_view()), before);
+        }
+        // Ignored appearances cannot consume the request: its first accepted
+        // appearance still adds and selects it with a fresh baseline.
+        monitor.observe(
+            15 * SECOND_NS,
+            appeared.iter().flat_map(|snapshot| snapshot.names()),
+            |name| counter_outcome(&appeared, name),
+        );
+        let view = monitor.selected_view();
+        assert_eq!(view.name, b"wg0");
+        assert_eq!((view.position, view.count), (3, 3));
+        baseline(view, 9000, 10000);
     }
 
     #[test]
@@ -582,9 +651,9 @@ mod tests {
         ] {
             let mut monitor = single(0, 1000, 2000);
             observe(&mut monitor, SECOND_NS, 1100, 2200);
-            monitor.observe(2 * SECOND_NS, |_| outcome);
+            monitor.observe(2 * SECOND_NS, [], |_| outcome);
             unavailable(monitor.selected_view(), state);
-            monitor.observe(3 * SECOND_NS, |_| outcome);
+            monitor.observe(3 * SECOND_NS, [], |_| outcome);
             unavailable(monitor.selected_view(), state);
             observe(&mut monitor, 100 * SECOND_NS, 50000, 90000);
             baseline(monitor.selected_view(), 50000, 90000);
@@ -602,6 +671,7 @@ mod tests {
             StartupSelection {
                 names: vec![b"A".to_vec(), b"B".to_vec()],
                 selected: 0,
+                pending_request: None,
             },
             Ceilings::default(),
             0,
@@ -616,9 +686,9 @@ mod tests {
         unavailable(monitor.selected_view(), ViewState::Absent);
         monitor.forward();
         unavailable(monitor.selected_view(), ViewState::ReadFailed);
-        monitor.observe(SECOND_NS, |_| CounterOutcome::Absent);
+        monitor.observe(SECOND_NS, [], |_| CounterOutcome::Absent);
         unavailable(monitor.selected_view(), ViewState::Absent);
-        monitor.observe(2 * SECOND_NS, |_| readable(1, 2));
+        monitor.observe(2 * SECOND_NS, [], |_| readable(1, 2));
         baseline(monitor.selected_view(), 1, 2);
         monitor.backward();
         baseline(monitor.selected_view(), 1, 2);
@@ -635,12 +705,13 @@ mod tests {
             StartupSelection {
                 names: names.clone(),
                 selected: 1,
+                pending_request: None,
             },
             ceilings,
             0,
             |_| readable(0, 0),
         );
-        monitor.observe(SECOND_NS, |_| readable(5_242_880, 1_310_720));
+        monitor.observe(SECOND_NS, [], |_| readable(5_242_880, 1_310_720));
         let mut expected = Vec::new();
         for index in [1, 2, 0] {
             let view = monitor.selected_view();
@@ -697,31 +768,34 @@ mod tests {
             counter_outcome(&initial, name)
         });
         let next = Ok(snapshot(&[(raw, 200, 400), (b"B", 1100, 2200)]));
-        monitor.observe(SECOND_NS, |name| counter_outcome(&next, name));
+        monitor.observe(
+            SECOND_NS,
+            next.iter().flat_map(|snapshot| snapshot.names()),
+            |name| counter_outcome(&next, name),
+        );
         let removed = Ok(snapshot(&[
             (b"renamed", 90000, 90000),
             (b"B", 1200, 2400),
             (b"C", 5, 6),
         ]));
-        let mut looked_up = Vec::new();
-        monitor.observe(2 * SECOND_NS, |name| {
-            looked_up.push(name.to_vec());
-            counter_outcome(&removed, name)
-        });
-        assert_eq!(looked_up, [raw.to_vec(), b"B".to_vec()]);
+        monitor.observe(
+            2 * SECOND_NS,
+            removed.iter().flat_map(|snapshot| snapshot.names()),
+            |name| counter_outcome(&removed, name),
+        );
         let view = monitor.selected_view();
         assert_eq!(view.name, raw);
-        assert_eq!((view.position, view.count), (1, 2));
+        assert_eq!((view.position, view.count), (1, 4));
         unavailable(view, ViewState::Absent);
         monitor.forward();
         assert_eq!(monitor.selected_view().name, b"B");
         assert_eq!(monitor.selected_view().incoming.samples.len(), 2);
-        monitor.forward();
+        monitor.backward();
         assert_eq!(monitor.selected_view().name, raw);
         // A global parse failure affects even the successfully measured B.
         let failed =
             Snapshot::parse(b"malformed\n").map_err(crate::proc_sampler::AcquisitionError::Parse);
-        monitor.observe(3 * SECOND_NS, |name| counter_outcome(&failed, name));
+        monitor.observe(3 * SECOND_NS, [], |name| counter_outcome(&failed, name));
         unavailable(monitor.selected_view(), ViewState::ReadFailed);
         monitor.forward();
         unavailable(monitor.selected_view(), ViewState::ReadFailed);
@@ -730,12 +804,16 @@ mod tests {
             (b"B", 2000, 3000),
             (b"C", 7, 8),
         ]));
-        monitor.observe(4 * SECOND_NS, |name| counter_outcome(&returned, name));
+        monitor.observe(
+            4 * SECOND_NS,
+            returned.iter().flat_map(|snapshot| snapshot.names()),
+            |name| counter_outcome(&returned, name),
+        );
         baseline(monitor.selected_view(), 2000, 3000);
         monitor.backward();
         baseline(monitor.selected_view(), 50000, 90000);
         assert_eq!(monitor.selected_view().name, raw);
-        assert_eq!(monitor.selected_view().count, 2);
+        assert_eq!(monitor.selected_view().count, 4);
     }
 
     #[test]
@@ -744,6 +822,7 @@ mod tests {
             StartupSelection {
                 names: vec![b"A".to_vec(), b"B".to_vec()],
                 selected: 0,
+                pending_request: None,
             },
             Ceilings::default(),
             0,
@@ -754,7 +833,7 @@ mod tests {
             (SECOND_NS, 100, 300),
             (4 * SECOND_NS, 400, 3300),
         ] {
-            monitor.observe(at, |name| {
+            monitor.observe(at, [], |name| {
                 if name == b"A" {
                     readable(a, a * 2)
                 } else {

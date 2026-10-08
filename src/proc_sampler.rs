@@ -3,7 +3,7 @@
 //! Whole-list acquisition of original-byte interface names and paired counters.
 //!
 //! Owns fresh `/proc/net/dev` reads through EOF and complete snapshot validation.
-//! Runtime snapshots do not change the monitor's fixed startup membership.
+//! Successful snapshots supply both discovery names and traffic observations.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -166,9 +166,14 @@ impl Snapshot {
         self.counters.get(name).copied()
     }
 
+    /// All original names, independent of activity and counter values.
+    pub(crate) fn names(&self) -> impl Iterator<Item = &[u8]> {
+        self.counters.keys().map(Vec::as_slice)
+    }
+
     /// Compute startup membership/selection without consuming the snapshot:
     /// the same counters must supply the monitor's initial baselines.
-    /// An absent requested name selects the first entry, just like no request.
+    /// An absent request selects the first entry and remains pending for runtime.
     /// Call only after successful acquisition; acquisition errors remain distinct.
     pub(crate) fn startup(
         &self,
@@ -179,10 +184,12 @@ impl Snapshot {
         }
         let mut names: Vec<_> = self.counters.keys().cloned().collect();
         names.sort_by(|left, right| natural_order(left, right));
-        let selected = requested
-            .and_then(|name| names.iter().position(|entry| entry == name))
-            .unwrap_or(0);
-        Ok(StartupSelection { names, selected })
+        let matched = requested.and_then(|name| names.iter().position(|entry| entry == name));
+        Ok(StartupSelection {
+            names,
+            selected: matched.unwrap_or(0),
+            pending_request: requested.filter(|_| matched.is_none()).map(<[u8]>::to_vec),
+        })
     }
 }
 
@@ -215,10 +222,12 @@ fn decimal_counter(field: &[u8]) -> Result<u64, SnapshotError> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StartupSelection {
-    /// Naturally sorted, complete fixed membership; retain for the whole run.
+    /// Naturally sorted initial membership; retain entries for the whole session.
     pub(crate) names: Vec<Vec<u8>>,
     /// Zero-based initial selection, always within the nonempty names list.
     pub(crate) selected: usize,
+    /// Exact absent startup request, consumed permanently on first observation.
+    pub(crate) pending_request: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,8 +246,7 @@ impl fmt::Display for StartupError {
 
 impl std::error::Error for StartupError {}
 
-/// Translate one global round for a retained name. Iterating the startup list,
-/// rather than snapshot names, ignores additions and retries every original name.
+/// Translate one global round for a retained or newly discovered name.
 pub(crate) fn counter_outcome(
     round: &Result<Snapshot, AcquisitionError>,
     name: &[u8],
@@ -251,7 +259,7 @@ pub(crate) fn counter_outcome(
     }
 }
 
-fn natural_order(left: &[u8], right: &[u8]) -> Ordering {
+pub(crate) fn natural_order(left: &[u8], right: &[u8]) -> Ordering {
     let (mut a, mut b) = (left, right);
     while let (Some(&x), Some(&y)) = (a.first(), b.first()) {
         let order = if x.is_ascii_digit() && y.is_ascii_digit() {
@@ -578,7 +586,10 @@ mod tests {
             assert!(snapshot.get(name).is_some()); // initial baselines remain available
         }
         for missing in [b"ETH2".as_slice(), b"wg0", b"missing", b"e\\xFF1", b""] {
-            assert_eq!(snapshot.startup(Some(missing)).unwrap(), default);
+            let fallback = snapshot.startup(Some(missing)).unwrap();
+            assert_eq!(fallback.names, default.names);
+            assert_eq!(fallback.selected, 0);
+            assert_eq!(fallback.pending_request.as_deref(), Some(missing));
         }
         let empty = Snapshot::parse(HEADERS).unwrap();
         assert_eq!(empty.startup(None), Err(StartupError::EmptyDiscovery));
@@ -667,7 +678,7 @@ mod tests {
     }
 
     #[test]
-    fn retained_name_rounds_ignore_additions_and_recognize_raw_name_return() {
+    fn counter_lookup_recognizes_absence_and_raw_name_return() {
         let raw = b"A\xff".as_slice();
         let initial = Snapshot::parse(&fixture(&[(raw, 1, 2), (b"B", 3, 4)])).unwrap();
         let membership = initial.startup(Some(raw)).unwrap();

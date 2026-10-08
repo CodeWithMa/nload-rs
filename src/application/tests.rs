@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 use super::*;
-use crate::monitor::ViewState;
+use crate::monitor::{Rates, ViewState};
 use crate::proc_sampler::{AcquisitionError, Snapshot};
 use crate::terminal::scripted::{Call, ScriptClock, ScriptedEffects};
 use crate::terminal::scripted_session::ScriptSession;
@@ -178,10 +178,14 @@ impl RuntimeEffects for Effects {
 #[derive(Debug)]
 struct View {
     name: Vec<u8>,
+    position: usize,
     count: usize,
     state: ViewState,
     total: Option<u64>,
+    outgoing_total: Option<u64>,
+    rates: (Option<Rates>, Option<Rates>),
     samples: Vec<(u64, f64)>,
+    outgoing_samples: Vec<(u64, f64)>,
     ceilings: (u64, u64),
 }
 
@@ -296,11 +300,20 @@ impl Harness {
                         let view = monitor.selected_view();
                         self.view = Some(View {
                             name: view.name.to_vec(),
+                            position: view.position,
                             count: view.count,
                             state: view.state,
                             total: view.incoming.total,
+                            outgoing_total: view.outgoing.total,
+                            rates: (view.incoming.rates, view.outgoing.rates),
                             samples: view
                                 .incoming
+                                .samples
+                                .iter()
+                                .map(|sample| (sample.at, sample.rate))
+                                .collect(),
+                            outgoing_samples: view
+                                .outgoing
                                 .samples
                                 .iter()
                                 .map(|sample| (sample.at, sample.rate))
@@ -435,9 +448,11 @@ fn observed_wire(selected: usize, width: usize, height: usize, rounds: usize) ->
     for round in 1..=rounds {
         let totals = round as u64 * 128;
         let snapshot = Ok(snapshot(&[(b"a", totals), (b"b", totals), (b"c", totals)]));
-        monitor.observe(round as u64 * SAMPLE_NS, |name| {
-            counter_outcome(&snapshot, name)
-        });
+        monitor.observe(
+            round as u64 * SAMPLE_NS,
+            snapshot.iter().flat_map(|snapshot| snapshot.names()),
+            |name| counter_outcome(&snapshot, name),
+        );
     }
     for _ in 0..selected {
         monitor.forward();
@@ -890,7 +905,7 @@ fn startup_reuses_discovery_and_orders_clock_before_terminal_mutation() {
 }
 
 #[test]
-fn raw_selection_and_ceiling_options_reach_the_fixed_monitor() {
+fn raw_selection_and_ceiling_options_reach_the_monitor() {
     for tokens in [
         vec![
             OsString::from_vec(vec![0xff]),
@@ -943,12 +958,17 @@ fn raw_selection_and_ceiling_options_reach_the_fixed_monitor() {
 fn slow_initialization_and_slow_acquisition_skip_slots_use_completion_and_actual_time() {
     let mut h = Harness::new(&[(b"a", 0)], vec![Tick::input(3 * SECOND + 1, b"q")]);
     h.session.state.borrow_mut().init_delay = 2 * SECOND;
-    h.counters.rounds.push_back(Ok(snapshot(&[(b"a", 3000)])));
+    h.counters
+        .rounds
+        .push_back(Ok(snapshot(&[(b"a", 3000), (b"new", 10000)])));
     h.counters.durations = VecDeque::from([0, SECOND]);
     assert_eq!(h.plain(), 0);
     assert_eq!(h.counters.calls, 2);
     assert_eq!(h.waits()[0].0, 3 * SECOND + SAMPLE_NS);
-    assert_eq!(h.view.unwrap().samples, [(3 * SECOND, 1000.0)]);
+    let view = h.view.unwrap();
+    assert_eq!(view.samples, [(3 * SECOND, 1000.0)]);
+    assert_eq!(view.name, b"a");
+    assert_eq!(view.count, 2);
 }
 
 #[test]
@@ -1078,7 +1098,7 @@ fn shutdown_preempts_due_sampling_input_resize_and_rendering() {
 }
 
 #[test]
-fn runtime_failure_absence_addition_and_return_are_quiet_nonfatal_fixed_membership() {
+fn runtime_failure_absence_addition_and_return_are_quiet_and_retain_membership() {
     let mut h = Harness::new(
         &[(b"a", 0), (b"b", 0)],
         vec![
@@ -1107,11 +1127,551 @@ fn runtime_failure_absence_addition_and_return_are_quiet_nonfatal_fixed_membersh
     assert!(h.emitted().contains("Unavailable: interface absent"));
     assert!(h.emitted().contains("Unavailable: counter read failed"));
     let view = h.view.unwrap();
-    assert_eq!(view.count, 2);
+    assert_eq!(view.count, 4);
     assert_eq!(view.name, b"a");
     assert_eq!(view.state, ViewState::Baseline);
     assert_eq!(view.total, Some(10000));
     assert!(view.samples.is_empty());
+}
+
+#[test]
+fn runtime_additions_preserve_selected_identity_and_are_naturally_navigable() {
+    let expected: &[&[u8]] = &[
+        b"Eth2",
+        b"eth1",
+        b"eth02",
+        b"eth2",
+        b"eth3",
+        b"eth10",
+        b"inactive",
+        b"lo",
+    ];
+    for reverse_rows in [false, true] {
+        // Exercise every arrow, including wrapping, without more sampling.
+        for (arrow, order) in [
+            (b"\x1b[C", vec![3, 4, 5, 6, 7, 0, 1, 2, 3]),
+            (b"\x1b[B", vec![3, 4, 5, 6, 7, 0, 1, 2, 3]),
+            (b"\x1b[D", vec![3, 2, 1, 0, 7, 6, 5, 4, 3]),
+            (b"\x1b[A", vec![3, 2, 1, 0, 7, 6, 5, 4, 3]),
+        ] {
+            let mut rows: Vec<_> = expected.iter().map(|name| (*name, 0)).collect();
+            if reverse_rows {
+                rows.reverse();
+            }
+            let mut ticks = vec![output_tick(SAMPLE_NS, None), output_tick(SECOND, None)];
+            for step in 1..order.len() {
+                ticks.push(Tick::input(SECOND + step as u64, arrow));
+            }
+            ticks.push(Tick::input(SECOND + 20, b"q"));
+            let mut h = Harness::new(&[(b"eth2", 0), (b"eth10", 0)], ticks);
+            h.counters
+                .rounds
+                .extend([Ok(snapshot(&rows)), Ok(snapshot(&rows))]);
+            assert_eq!(h.plain(), 0);
+            let view = h.view.as_ref().unwrap();
+            assert_eq!(view.name, b"eth2");
+            assert_eq!((view.position, view.count), (4, 8));
+            let emitted = h.emitted();
+            let mut suffix = emitted.as_str();
+            for index in order {
+                let header = format!(
+                    "Interface {} ({}/8)",
+                    String::from_utf8_lossy(expected[index]),
+                    index + 1
+                );
+                let found = suffix
+                    .find(&header)
+                    .unwrap_or_else(|| panic!("missing {header}"));
+                suffix = &suffix[found + header.len()..];
+            }
+            assert_eq!(h.counters.calls, 3);
+            assert!(h.stderr.is_empty());
+        }
+    }
+}
+
+#[test]
+fn additions_keep_existing_history_and_start_offscreen_statistics_with_session_ceilings() {
+    struct Case {
+        rounds: u64,
+        navigate: bool,
+        name: &'static [u8],
+        position: usize,
+        total: u64,
+        samples: Vec<(u64, f64)>,
+        rates: Option<[f64; 4]>,
+    }
+    for Case {
+        rounds,
+        navigate,
+        name,
+        position,
+        total,
+        samples,
+        rates,
+    } in [
+        Case {
+            rounds: 2,
+            navigate: false,
+            name: b"eth1",
+            position: 2,
+            total: 300,
+            samples: vec![(SAMPLE_NS, 200.0), (SECOND, 300.0)],
+            rates: Some([300.0, 300.0, 200.0, 300.0]),
+        },
+        Case {
+            rounds: 2,
+            navigate: true,
+            name: b"eth0",
+            position: 1,
+            total: 1000,
+            samples: vec![],
+            rates: None,
+        },
+        Case {
+            rounds: 3,
+            navigate: false,
+            name: b"eth1",
+            position: 2,
+            total: 600,
+            samples: vec![
+                (SAMPLE_NS, 200.0),
+                (SECOND, 300.0),
+                (SECOND + SAMPLE_NS, 500.0),
+            ],
+            rates: Some([500.0, 400.0, 200.0, 500.0]),
+        },
+        Case {
+            rounds: 3,
+            navigate: true,
+            name: b"eth0",
+            position: 1,
+            total: 1100,
+            samples: vec![(SECOND + SAMPLE_NS, 200.0)],
+            rates: Some([200.0; 4]),
+        },
+    ] {
+        let mut ticks: Vec<_> = (1..=rounds)
+            .map(|round| output_tick(round * SAMPLE_NS, None))
+            .collect();
+        let end = rounds * SAMPLE_NS;
+        if navigate {
+            ticks.push(Tick::input(end + 1, b"\x1b[D"));
+        }
+        ticks.push(Tick::input(end + 2, b"q"));
+        let mut h = Harness::new(&[(b"eth1", 0)], ticks);
+        let observations = [
+            snapshot(&[(b"eth1", 100)]),
+            snapshot(&[(b"eth0", 1000), (b"eth1", 300), (b"eth2", 0)]),
+            snapshot(&[(b"eth2", 0), (b"eth1", 600), (b"eth0", 1100)]),
+        ];
+        h.counters
+            .rounds
+            .extend(observations.into_iter().take(rounds as usize).map(Ok));
+        assert_eq!(h.run(&args(&["-i", "20480", "-o", "5120"])), 0);
+        let view = h.view.unwrap();
+        assert_eq!(view.name, name);
+        assert_eq!((view.position, view.count), (position, 3));
+        assert_eq!(
+            (view.total, view.outgoing_total),
+            (Some(total), Some(total))
+        );
+        assert_eq!(view.samples, samples);
+        assert_eq!(view.outgoing_samples, samples);
+        assert_eq!(view.ceilings, (2_621_440, 655_360));
+        for actual in [view.rates.0, view.rates.1] {
+            assert_eq!(
+                actual.map(|r| [r.current, r.average, r.minimum, r.maximum]),
+                rates
+            );
+        }
+        assert_eq!(h.counters.calls, rounds as usize + 1);
+        assert!(h.stderr.is_empty());
+    }
+}
+
+#[test]
+fn empty_rounds_and_renames_retain_unavailable_entries_and_returns_start_baselines() {
+    struct Case {
+        rounds: u64,
+        arrow: Option<&'static [u8]>,
+        name: &'static [u8],
+        position: usize,
+        count: usize,
+        state: ViewState,
+        total: Option<u64>,
+    }
+    for Case {
+        rounds,
+        arrow,
+        name,
+        position,
+        count,
+        state,
+        total,
+    } in [
+        Case {
+            rounds: 1,
+            arrow: None,
+            name: b"eth2",
+            position: 1,
+            count: 3,
+            state: ViewState::Absent,
+            total: None,
+        },
+        Case {
+            rounds: 1,
+            arrow: Some(b"\x1b[C"),
+            name: b"eth3",
+            position: 2,
+            count: 3,
+            state: ViewState::Baseline,
+            total: Some(9000),
+        },
+        Case {
+            rounds: 2,
+            arrow: None,
+            name: b"eth2",
+            position: 1,
+            count: 3,
+            state: ViewState::Absent,
+            total: None,
+        },
+        Case {
+            rounds: 3,
+            arrow: None,
+            name: b"eth2",
+            position: 2,
+            count: 4,
+            state: ViewState::Baseline,
+            total: Some(10000),
+        },
+        Case {
+            rounds: 3,
+            arrow: Some(b"\x1b[C"),
+            name: b"eth3",
+            position: 3,
+            count: 4,
+            state: ViewState::Baseline,
+            total: Some(12000),
+        },
+    ] {
+        let mut ticks: Vec<_> = (1..=rounds)
+            .map(|round| output_tick(round * SAMPLE_NS, None))
+            .collect();
+        let end = rounds * SAMPLE_NS;
+        if let Some(arrow) = arrow {
+            ticks.push(Tick::input(end + 1, arrow));
+        }
+        ticks.push(Tick::input(end + 2, b"q"));
+        let mut h = Harness::new(&[(b"eth2", 100), (b"lo", 0)], ticks);
+        h.counters.rounds.extend(
+            [
+                snapshot(&[(b"eth3", 9000), (b"lo", 0)]),
+                snapshot(&[]),
+                snapshot(&[(b"eth3", 12000), (b"eth2", 10000), (b"eth1", 0)]),
+            ]
+            .into_iter()
+            .take(rounds as usize)
+            .map(Ok),
+        );
+        assert_eq!(h.plain(), 0);
+        let view = h.view.unwrap();
+        assert_eq!(view.name, name);
+        assert_eq!((view.position, view.count), (position, count));
+        assert_eq!(view.state, state);
+        assert_eq!(view.total, total);
+        assert!(view.samples.is_empty());
+        assert!(h.stderr.is_empty());
+    }
+}
+
+#[test]
+fn missing_startup_request_survives_navigation_and_selects_its_first_observation() {
+    for appear in [false, true] {
+        let mut ticks = vec![
+            output_tick(0, None),
+            Tick::input(1, b"\x1b[C"),
+            output_tick(SAMPLE_NS, None),
+        ];
+        if appear {
+            ticks.push(output_tick(SECOND, None));
+        }
+        ticks.push(Tick::input(
+            if appear { SECOND + 1 } else { SAMPLE_NS + 1 },
+            b"q",
+        ));
+        let mut h = Harness::new(&[(b"eth2", 0), (b"lo", 0)], ticks);
+        h.counters
+            .rounds
+            .push_back(Ok(snapshot(&[(b"eth1", 0), (b"eth2", 100), (b"lo", 0)])));
+        if appear {
+            h.counters.rounds.push_back(Ok(snapshot(&[
+                (b"wg0", 9000),
+                (b"lo", 0),
+                (b"eth2", 200),
+                (b"eth1", 0),
+            ])));
+        }
+        assert_eq!(h.run(&args(&["wg0"])), 0);
+        assert!(h.stderr.is_empty());
+        let emitted = h.emitted();
+        assert!(emitted.contains("Interface eth2 (1/2)"));
+        assert!(emitted.contains("Interface lo (3/3)"));
+        assert!(!emitted.contains("Interface wg0 (") || appear);
+        let view = h.view.unwrap();
+        if appear {
+            assert_eq!(view.name, b"wg0");
+            assert_eq!((view.position, view.count), (4, 4));
+            assert_eq!(view.state, ViewState::Baseline);
+            assert_eq!((view.total, view.outgoing_total), (Some(9000), Some(9000)));
+            assert_eq!(view.rates, (None, None));
+            assert!(view.samples.is_empty() && view.outgoing_samples.is_empty());
+            assert!(emitted.contains("Interface wg0 (4/4)"));
+        } else {
+            assert_eq!(view.name, b"lo");
+            assert_eq!((view.position, view.count), (3, 3));
+        }
+        assert_eq!(h.counters.calls, if appear { 3 } else { 2 });
+    }
+}
+
+#[test]
+fn honored_startup_requests_never_reselect_after_failures_or_repeated_returns() {
+    for present_at_startup in [false, true] {
+        for navigate_to_returned in [false, true] {
+            let mut ticks = vec![output_tick(0, None)];
+            if present_at_startup {
+                ticks.push(Tick::input(1, b"\x1b[D"));
+                ticks.push(output_tick(SAMPLE_NS, None));
+            } else {
+                ticks.push(output_tick(SAMPLE_NS, None));
+                ticks.push(Tick::input(SAMPLE_NS + 1, b"\x1b[D"));
+            }
+            ticks.extend((2..=6).map(|round| output_tick(round * SAMPLE_NS, None)));
+            if navigate_to_returned {
+                ticks.push(Tick::input(3 * SECOND + 1, b"\x1b[C"));
+            }
+            ticks.push(Tick::input(3 * SECOND + 2, b"q"));
+            let initial: &[(&[u8], u64)] = if present_at_startup {
+                &[(b"eth0", 0), (b"wg0", 0)]
+            } else {
+                &[(b"eth0", 0)]
+            };
+            let mut h = Harness::new(initial, ticks);
+            h.counters.rounds.push_back(Ok(if present_at_startup {
+                snapshot(&[(b"eth0", 100)])
+            } else {
+                snapshot(&[(b"eth0", 100), (b"wg0", 1000)])
+            }));
+            h.counters.rounds.extend([
+                Err(AcquisitionError::Read(io::Error::other("proc failure"))),
+                Ok(snapshot(&[(b"eth0", 300), (b"aardvark", 0)])),
+                Ok(snapshot(&[
+                    (b"wg0", 5000),
+                    (b"eth0", 400),
+                    (b"aardvark", 0),
+                ])),
+                Ok(snapshot(&[(b"eth0", 500), (b"aardvark", 0)])),
+                Ok(snapshot(&[
+                    (b"eth0", 600),
+                    (b"wg0", 9000),
+                    (b"aardvark", 0),
+                ])),
+            ]);
+            assert_eq!(h.run(&args(&["wg0"])), 0);
+            assert!(h.emitted().contains("Interface wg0 (2/2)"));
+            let view = h.view.unwrap();
+            assert_eq!(view.count, 3);
+            if navigate_to_returned {
+                assert_eq!(view.name, b"wg0");
+                assert_eq!(view.position, 3);
+                assert_eq!(view.state, ViewState::Baseline);
+                assert_eq!(view.total, Some(9000));
+                assert!(view.samples.is_empty());
+            } else {
+                assert_eq!(view.name, b"eth0");
+                assert_eq!(view.position, 2);
+                assert_eq!(view.state, ViewState::Measured);
+                assert_eq!(view.samples.len(), 3);
+            }
+            assert_eq!(h.counters.calls, 7);
+            assert!(h.stderr.is_empty());
+        }
+    }
+}
+
+#[test]
+fn pending_request_survives_empty_and_failed_rounds_without_partial_discovery() {
+    for rounds in 1..=5 {
+        let mut ticks: Vec<_> = (1..=rounds)
+            .map(|round| output_tick(round * SAMPLE_NS, None))
+            .collect();
+        ticks.push(Tick::input(rounds * SAMPLE_NS + 1, b"q"));
+        let mut h = Harness::new(&[(b"eth2", 0), (b"lo", 0)], ticks);
+        let mut malformed = b"Inter-|Receive|Transmit\nface|bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\nwg0: 9000 0 0 0 0 0 0 0 9000 0 0 0 0 0 0 0\nphantom: 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0\n".to_vec();
+        malformed.extend_from_slice(b"bad row\n");
+        h.counters.rounds.extend(
+            [
+                Ok(snapshot(&[(b"eth1", 0), (b"eth2", 100), (b"lo", 0)])),
+                Ok(snapshot(&[])),
+                Err(AcquisitionError::Read(io::Error::other("proc failure"))),
+                Snapshot::parse(&malformed).map_err(AcquisitionError::Parse),
+                Ok(snapshot(&[(b"wg0", 10000), (b"eth2", 1000)])),
+            ]
+            .into_iter()
+            .take(rounds as usize),
+        );
+        assert_eq!(h.run(&args(&["wg0"])), 0);
+        let view = h.view.unwrap();
+        assert_eq!(
+            view.name,
+            if rounds == 5 {
+                b"wg0".as_slice()
+            } else {
+                b"eth2"
+            }
+        );
+        assert_eq!(
+            (view.position, view.count),
+            if rounds == 5 { (4, 4) } else { (2, 3) }
+        );
+        assert_eq!(
+            view.state,
+            [
+                ViewState::Measured,
+                ViewState::Absent,
+                ViewState::ReadFailed,
+                ViewState::ReadFailed,
+                ViewState::Baseline
+            ][rounds as usize - 1]
+        );
+        if rounds == 5 {
+            assert_eq!(view.total, Some(10000));
+            assert!(view.samples.is_empty());
+        }
+        assert_eq!(h.counters.calls, rounds as usize + 1);
+        assert!(h.stderr.is_empty());
+    }
+}
+
+#[test]
+fn delayed_selection_matches_original_bytes_including_option_terminated_names() {
+    for (requested, near) in [
+        (b"ETH2".as_slice(), b"eth2".as_slice()),
+        (b"eth10", b"eth2"),
+        (b"e\xff2", b"e\\xFF2"),
+        (b"e\\xFF2", b"e\xff2"),
+        (b"-name", b"-Name"),
+    ] {
+        for match_exact in [false, true] {
+            let mut ticks = vec![output_tick(SAMPLE_NS, None)];
+            if match_exact {
+                ticks.push(output_tick(SECOND, None));
+            }
+            ticks.push(Tick::input(
+                if match_exact {
+                    SECOND + 1
+                } else {
+                    SAMPLE_NS + 1
+                },
+                b"q",
+            ));
+            let mut h = Harness::new(&[(b"lo", 0)], ticks);
+            h.counters
+                .rounds
+                .push_back(Ok(snapshot(&[(near, 10), (b"lo", 0)])));
+            if match_exact {
+                h.counters.rounds.push_back(Ok(snapshot(&[
+                    (requested, 1000),
+                    (b"lo", 0),
+                    (near, 20),
+                ])));
+            }
+            assert_eq!(
+                h.run(&["--".into(), OsString::from_vec(requested.to_vec())]),
+                0
+            );
+            let view = h.view.unwrap();
+            assert_eq!(view.name, if match_exact { requested } else { b"lo" });
+            assert_eq!(view.count, if match_exact { 3 } else { 2 });
+            if match_exact {
+                assert_eq!(view.state, ViewState::Baseline);
+                assert_eq!(view.total, Some(1000));
+                assert!(view.samples.is_empty());
+            }
+            assert!(h.stderr.is_empty());
+        }
+    }
+}
+
+#[test]
+fn regressing_completion_clocks_stop_before_discovery_selection_and_statistics() {
+    for completion in [SECOND, SECOND - 1] {
+        let mut h = Harness::new(
+            &[(b"eth2", 100)],
+            vec![output_tick(SECOND + SAMPLE_NS, None)],
+        );
+        h.clock.clock.0.borrow_mut().time = SECOND;
+        h.counters.rounds.push_back(Ok(snapshot(&[
+            (b"eth1", 0),
+            (b"eth2", 1000),
+            (b"wg0", 9000),
+        ])));
+        let clock = h.clock.clock.clone();
+        h.counters.on_acquire = Some(Box::new(move |call| {
+            if call == 2 {
+                clock.0.borrow_mut().readings.push_back(Ok(completion));
+            }
+        }));
+        // Runtime rejects backward clock reads before monitor ingestion.
+        assert_eq!(h.run(&args(&["wg0"])), 1);
+        let view = h.view.as_ref().unwrap();
+        assert_eq!(view.name, b"eth2");
+        assert_eq!((view.position, view.count), (1, 1));
+        assert_eq!(view.state, ViewState::Baseline);
+        assert_eq!(view.total, Some(100));
+        assert_eq!(view.rates, (None, None));
+        assert!(view.samples.is_empty());
+        assert!(String::from_utf8_lossy(&h.stderr).contains("clock moved backwards"));
+        h.restored();
+    }
+}
+
+#[test]
+fn delayed_selection_allows_later_input_and_due_shutdown_keeps_priority() {
+    for quit in [false, true] {
+        let mut h = Harness::new(
+            &[(b"eth0", 0)],
+            vec![
+                Tick::input(SAMPLE_NS, if quit { b"\x1b[Cq" } else { b"\x1b[C" }),
+                Tick::input(SAMPLE_NS + 1, b"q"),
+            ],
+        );
+        h.counters
+            .rounds
+            .push_back(Ok(snapshot(&[(b"eth0", 100), (b"wg0", 1000)])));
+        assert_eq!(h.run(&args(&["wg0"])), 0);
+        assert_eq!(
+            h.view.as_ref().unwrap().name,
+            if quit { b"wg0".as_slice() } else { b"eth0" }
+        );
+        assert_eq!(h.view.as_ref().unwrap().count, 2);
+        assert_eq!(h.counters.calls, 2);
+        assert!(h.stderr.is_empty());
+    }
+}
+
+#[test]
+fn empty_startup_fails_before_terminal_initialization_with_or_without_request() {
+    for tokens in [vec![], args(&["wg0"])] {
+        let mut h = Harness::new(&[], vec![]);
+        assert_eq!(h.run(&tokens), 1);
+        assert_eq!(h.stderr, b"nload-rs: no interfaces discovered\n");
+        assert!(h.session.state.borrow().calls.is_empty());
+        assert!(h.view.is_none());
+        assert_eq!(h.counters.calls, 1);
+    }
 }
 
 #[test]

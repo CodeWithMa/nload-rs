@@ -7,8 +7,9 @@ Inspired by [nload](https://github.com/rolandriegel/nload) by Roland Riegel.
 ## Implementation status
 
 The application runs a single-interface view with incoming/outgoing colored
-Braille graphs, traffic statistics and arrow-key navigation through the startup
-interface list. Incoming uses indigo/lavender grades; outgoing uses magenta.
+Braille graphs, traffic statistics and arrow-key navigation through a naturally
+sorted interface collection that grows as interfaces appear during monitoring.
+Incoming uses indigo/lavender grades; outgoing uses magenta.
 The [verified styled graph handoff](.scratch/btop-graph-implementation/handoff.md)
 links completed build, deterministic, Linux PTY, human emulator, live-traffic,
 and artifact acceptance for version 0.1.1. The
@@ -47,7 +48,14 @@ Use arrows to navigate, q/Q to quit, or Ctrl+C to exit with status 130.
 An optional interface name selects the initial view without filtering the
 list. If that name is absent at startup (for example, `wg0` before the VPN starts),
 the first naturally sorted interface is selected silently, just as when no name
-is supplied. Interfaces that appear later are available after restarting.
+is supplied, then switches to the requested name the first time it appears, even
+if you navigate elsewhere while waiting. This request is honored only once;
+disappearance and return never trigger another automatic switch.
+Interfaces that appear later become navigable automatically on the
+regular 500-ms sampling schedule. Additions keep the same interface selected;
+disappeared interfaces remain navigable as unavailable entries, and returning
+names reuse their entries with fresh statistics.
+Starting with no interfaces remains an error.
 Independent `-i VALUE`/`-o VALUE` graph ceilings use integer binary-scaled
 kBit/s; each defaults to 10240, and zero restores that direction's default.
 
@@ -55,7 +63,8 @@ Each graph cell combines two actual current-rate observations, older on the
 left and newer on the right, with independent bottom-up dot fill. The newest
 sample is right-aligned; an unmatched oldest half and measured zero are true
 ASCII blanks. Five minutes of observation-driven history are retained for every
-startup interface, independent of screen size. At the unchanged 500-ms cadence,
+retained interface, including those discovered off-screen, independent of screen
+size. At the unchanged 500-ms cadence,
 one cell nominally spans one second; delayed observations remain observation
 spaced rather than forming an exact time axis. Shrink/grow and redraw only hide
 or reveal the fitting suffix (60 samples at 60×16, 100 at 80×24).
@@ -92,6 +101,11 @@ supersedes the historical ASCII thresholds, one-sample-per-cell presentation,
 ASCII-row interface, and affected output/restoration promises. Graph presentation
 is inspired by btop and implemented independently from standard Unicode/ANSI
 facts, without adding dependencies.
+
+The [dynamic interface discovery specification](.scratch/dynamic-interface-discovery/spec.md)
+supersedes the historical Rust-port promises of startup-only membership and
+forgotten absent startup requests. Its [implementation record](.scratch/dynamic-interface-discovery/implementation.md)
+records acceptance coverage and verification for the current behavior.
 
 ## Arch Linux installation
 

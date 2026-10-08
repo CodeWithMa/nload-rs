@@ -1,6 +1,6 @@
 # Dynamic interface discovery and one-time startup-request selection
 
-Status: open
+Status: closed
 Labels: ready-for-agent
 Confirmed: 2026-10-08, from the agreed behavior and application-session test seam
 

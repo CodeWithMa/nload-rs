@@ -11,6 +11,7 @@ fn baseline_monitor(name: &[u8], ceilings: Ceilings) -> Monitor {
         StartupSelection {
             names: vec![name.to_vec()],
             selected: 0,
+            pending_request: None,
         },
         ceilings,
         0,
@@ -37,7 +38,7 @@ fn colored_frame(name: &[u8], width: usize, height: usize) -> crate::screen::Fra
         },
     );
     for (at, total) in [(1_000_000_000, 24), (2_000_000_000, 48)] {
-        monitor.observe(at, |_| {
+        monitor.observe(at, [], |_| {
             CounterOutcome::Readable(Counters {
                 incoming: total,
                 outgoing: total,

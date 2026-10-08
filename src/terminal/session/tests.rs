@@ -222,6 +222,7 @@ fn explicit_and_drop_cleanup_cancel_partial_sgr_and_reset_before_screen_restorat
         StartupSelection {
             names: vec![b"eth0".to_vec()],
             selected: 0,
+            pending_request: None,
         },
         Ceilings {
             incoming: 128,
@@ -235,7 +236,7 @@ fn explicit_and_drop_cleanup_cancel_partial_sgr_and_reset_before_screen_restorat
             })
         },
     );
-    monitor.observe(500_000_000, |_| {
+    monitor.observe(500_000_000, [], |_| {
         CounterOutcome::Readable(Counters {
             incoming: 128,
             outgoing: 128,

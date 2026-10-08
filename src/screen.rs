@@ -933,6 +933,7 @@ mod tests {
             StartupSelection {
                 names: vec![name],
                 selected: 0,
+                pending_request: None,
             },
             ceilings,
             0,
@@ -947,7 +948,7 @@ mod tests {
             outgoing: 128,
         };
         let mut monitor = monitor(b"eth0".to_vec(), ceilings, 0, 0);
-        monitor.observe(1, |_| {
+        monitor.observe(1, [], |_| {
             CounterOutcome::Readable(Counters {
                 incoming: u64::MAX,
                 outgoing: u64::MAX,
@@ -1004,7 +1005,7 @@ mod tests {
             "Ttl: 1.00 kByte",
             "Ttl: 2.00 kByte",
         );
-        monitor.observe(500_000_000, |_| {
+        monitor.observe(500_000_000, [], |_| {
             CounterOutcome::Readable(Counters {
                 incoming: 1024,
                 outgoing: 2048,
@@ -1028,21 +1029,21 @@ mod tests {
                     .all(|row| cells(row, 0, 50) == " ".repeat(50))
             );
         }
-        monitor.observe(1_000_000_000, |_| CounterOutcome::Absent);
+        monitor.observe(1_000_000_000, [], |_| CounterOutcome::Absent);
         check(
             &monitor,
             "Unavailable: interface absent",
             "Ttl: --",
             "Ttl: --",
         );
-        monitor.observe(1_500_000_000, |_| CounterOutcome::ReadFailed);
+        monitor.observe(1_500_000_000, [], |_| CounterOutcome::ReadFailed);
         check(
             &monitor,
             "Unavailable: counter read failed",
             "Ttl: --",
             "Ttl: --",
         );
-        monitor.observe(2_000_000_000, |_| {
+        monitor.observe(2_000_000_000, [], |_| {
             CounterOutcome::Readable(Counters {
                 incoming: 4096,
                 outgoing: 8192,
@@ -1054,13 +1055,13 @@ mod tests {
             "Ttl: 4.00 kByte",
             "Ttl: 8.00 kByte",
         );
-        monitor.observe(3_000_000_000, |_| {
+        monitor.observe(3_000_000_000, [], |_| {
             CounterOutcome::Readable(Counters {
                 incoming: 8192,
                 outgoing: 16384,
             })
         });
-        monitor.observe(4_000_000_000, |_| {
+        monitor.observe(4_000_000_000, [], |_| {
             CounterOutcome::Readable(Counters {
                 incoming: 1024,
                 outgoing: 20000,
@@ -1086,7 +1087,7 @@ mod tests {
             0,
         );
         for (seconds, expected) in [(2, " ⢸"), (4, " ⡇"), (6, "⢸ ")] {
-            monitor.observe(seconds * 1_000_000_000, |_| {
+            monitor.observe(seconds * 1_000_000_000, [], |_| {
                 CounterOutcome::Readable(Counters {
                     incoming: 200,
                     outgoing: 200,
@@ -1199,7 +1200,7 @@ mod tests {
             };
             // Two-second observations give a full or genuinely zero current-rate
             // half-cell, without fabricating catch-up samples for delayed rounds.
-            monitor.observe(index * 2_000_000_000, |_| {
+            monitor.observe(index * 2_000_000_000, [], |_| {
                 CounterOutcome::Readable(Counters {
                     incoming: total,
                     outgoing: total,
@@ -1253,7 +1254,7 @@ mod tests {
             if index == 1 || (42..=100).contains(&index) {
                 total += 200;
             }
-            monitor.observe(index * 2_000_000_000, |_| {
+            monitor.observe(index * 2_000_000_000, [], |_| {
                 CounterOutcome::Readable(Counters {
                     incoming: total,
                     outgoing: total,
@@ -1285,6 +1286,7 @@ mod tests {
             StartupSelection {
                 names: vec![b"eth0".to_vec(), b"eth1".to_vec()],
                 selected: 0,
+                pending_request: None,
             },
             Ceilings {
                 incoming: 100,
@@ -1303,7 +1305,7 @@ mod tests {
             "Interface eth0 (1/2)"
         );
         for index in 1..=3 {
-            monitor.observe(index * 2_000_000_000, |_| {
+            monitor.observe(index * 2_000_000_000, [], |_| {
                 CounterOutcome::Readable(Counters {
                     incoming: index * 200,
                     outgoing: index * 200,

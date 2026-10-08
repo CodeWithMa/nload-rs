@@ -140,7 +140,11 @@ fn checkpoint<C: CounterSource, O: RuntimeEffects>(
     if runtime.now()? >= *deadline {
         let round = counters.acquire();
         let completed = runtime.now()?;
-        monitor.observe(completed, |name| counter_outcome(&round, name));
+        monitor.observe(
+            completed,
+            round.iter().flat_map(|snapshot| snapshot.names()),
+            |name| counter_outcome(&round, name),
+        );
         let slots = completed
             .checked_sub(*deadline)
             .and_then(|elapsed| (elapsed / SAMPLE_NS).checked_add(1))

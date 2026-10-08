@@ -12,7 +12,7 @@ use std::os::unix::ffi::OsStrExt;
 pub(crate) const DEFAULT_CEILING_KBIT: u64 = 10240;
 pub(crate) const DEFAULT_CEILING_BYTES: u64 = DEFAULT_CEILING_KBIT * 128;
 
-/// Positive bytes/s ceilings shared by every startup interface.
+/// Positive bytes/s ceilings shared by every retained interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Ceilings {
     pub(crate) incoming: u64,
@@ -140,9 +140,11 @@ pub(crate) fn help_text() -> String {
         "Usage: {name} [-i VALUE] [-o VALUE] [--] [INTERFACE]\n\
          \x20      {name} --help\n\
          \x20      {name} --version\n\n\
-         Monitor one interface; arrows navigate the complete startup list.\n\
+         Monitor one interface; arrows navigate the naturally sorted collection.\n\
+         New interfaces are discovered automatically; absent entries are retained.\n\
          INTERFACE selects an exact, case-sensitive name; -- ends option parsing.\n\
-         If the requested name is not found, use the first naturally sorted interface.\n\
+         If absent at startup, use the first interface until the requested name appears.\n\
+         Select the requested name once, even after navigation while waiting.\n\
          -i VALUE  Incoming graph ceiling\n\
          -o VALUE  Outgoing graph ceiling\n\
          VALUE is ASCII decimal binary-scaled kBit/s (1 kBit/s = 1024 Bit/s\n\

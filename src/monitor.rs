@@ -435,12 +435,12 @@ mod tests {
         rates(view.outgoing, [2000.0; 4]);
         assert_eq!(view.incoming.samples.len(), 1);
         assert_eq!(view.incoming.samples[0].at, 17 + 3 * SECOND_NS);
-        // A long suspend-equivalent interval still contributes only one column.
+        // A long suspend-equivalent interval still contributes only one sample.
         observe(&mut monitor, 17 + 603 * SECOND_NS, 63400, 126800);
         let view = monitor.selected_view();
         rates(view.incoming, [100.0, 100.0, 100.0, 1000.0]);
         rates(view.outgoing, [200.0, 200.0, 200.0, 2000.0]);
-        assert_eq!(view.incoming.samples.len(), 1); // old column expired
+        assert_eq!(view.incoming.samples.len(), 1); // old sample expired
     }
 
     #[test]
@@ -791,7 +791,7 @@ mod tests {
         observe(&mut monitor, SECOND_NS - 1, 0, 0);
         observe(&mut monitor, SECOND_NS, 0, 0);
         observe(&mut monitor, SECOND_NS + 1, 0, 0);
-        // Populate more history than a normal 50-column graph can show.
+        // Populate more than the 100 samples a normal 50-cell graph can show.
         for second in 2..=301 {
             observe(&mut monitor, second * SECOND_NS, second * 10, second * 20);
         }
@@ -799,20 +799,24 @@ mod tests {
         let retained: Vec<_> = view.incoming.samples.iter().copied().collect();
         assert_eq!(retained.len(), 302);
         assert_eq!(retained[0].at, SECOND_NS); // t-300 exactly retained
-        assert_eq!(retained[0].rate, 0.0); // genuine zero occupies a column
+        assert_eq!(retained[0].rate, 0.0); // genuine zero occupies a half-cell
         assert_eq!(retained[1].at, SECOND_NS + 1);
         assert_eq!(retained.last().unwrap().at, 301 * SECOND_NS);
         let before = saved(view);
         // Consumer-side fitting demonstrates shrink/grow cannot mutate/expire:
         // no dimensions or redraw clock are accepted by the monitor interface.
-        for width in [50, 1, 0, 400, 50] {
+        for (width, count) in [(50, 100), (1, 2), (0, 0), (400, 302), (50, 100)] {
             let samples = monitor.selected_view().incoming.samples;
             let fitting: Vec<_> = samples
                 .iter()
-                .skip(samples.len().saturating_sub(width))
+                .skip(samples.len().saturating_sub(2 * width))
                 .copied()
                 .collect();
-            assert_eq!(fitting, retained[retained.len().saturating_sub(width)..]);
+            assert_eq!(fitting.len(), count);
+            assert_eq!(
+                fitting,
+                retained[retained.len().saturating_sub(2 * width)..]
+            );
             assert_eq!(saved(monitor.selected_view()), before);
         }
         observe(&mut monitor, 301 * SECOND_NS + 1, 3010, 6020);

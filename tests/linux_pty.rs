@@ -620,6 +620,70 @@ fn small_startup_resize_sampling_navigation_and_quit_keep_bounded_rows() {
 }
 
 #[test]
+fn accepted_full_views_emit_colored_braille_under_no_color_and_locale_declarations() {
+    use std::net::UdpSocket;
+
+    for (width, height, locale, no_color) in [
+        (60, 16, None, None),
+        (60, 16, Some("C"), Some("1")),
+        (80, 24, Some("C.UTF-8"), Some("")),
+        (80, 24, Some("not-a-probed-locale"), Some("1")),
+    ] {
+        let mut product = Product::spawn(width, height, |command, _, _| {
+            command.args(["-i", "1", "-o", "1", "lo"]);
+            if let Some(locale) = locale {
+                command.env("LC_ALL", locale).env("LANG", locale);
+            } else {
+                command.env_remove("LC_ALL").env_remove("LANG");
+            }
+            if let Some(value) = no_color {
+                command.env("NO_COLOR", value);
+            } else {
+                command.env_remove("NO_COLOR");
+            }
+        });
+        let baseline = product.frame(width as usize, height as usize, |_| true);
+        assert!(baseline[0].starts_with("Interface lo "));
+        assert_eq!(baseline[1], "Waiting for rate sample");
+        assert!(find(&product.bytes, b"\x1b[38;5;").is_none());
+
+        // Ordinary nonprivileged loopback traffic after the baseline. Receive
+        // each datagram immediately so queue capacity is not a timing oracle.
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver.set_read_timeout(Some(LIMIT)).unwrap();
+        let address = receiver.local_addr().unwrap();
+        let payload = [0x5a; 4096];
+        let mut received = [0; 4096];
+        for _ in 0..16 {
+            assert_eq!(sender.send_to(&payload, address).unwrap(), payload.len());
+            assert_eq!(receiver.recv_from(&mut received).unwrap().0, payload.len());
+        }
+        let graph_width = width as usize - 30;
+        let rows = product.frame(width as usize, height as usize, |rows| {
+            matches!(rows[3].chars().nth(graph_width - 1), Some('⢸' | '⣿'))
+        });
+        let incoming_end = 3 + (height as usize - 4) / 2;
+        for row in rows[3..incoming_end]
+            .iter()
+            .chain(&rows[incoming_end + 1..])
+        {
+            assert!(matches!(row.chars().nth(graph_width - 1), Some('⢸' | '⣿')));
+            assert_eq!(row.chars().nth(graph_width).unwrap_or(' '), ' ');
+            assert_eq!(row.chars().nth(graph_width + 1).unwrap_or(' '), ' ');
+        }
+        for index in [60, 61, 98, 140, 146, 183, 96, 132, 133, 170, 176, 219] {
+            assert!(find(&product.bytes, format!("\x1b[38;5;{index}m").as_bytes()).is_some());
+        }
+        assert!(!product.bytes.contains(&b'\n'));
+        assert!(!product.bytes.contains(&b'\r'));
+        product.send(b"q");
+        assert!(product.finish(0, true).is_empty()); // redirected stderr supported
+        product.assert_cleanup();
+    }
+}
+
+#[test]
 fn rejected_term_and_independent_nonterminal_streams_do_not_mutate() {
     for term in [None, Some(""), Some("dumb"), Some("linux")] {
         let mut product = Product::spawn(80, 24, |command, _, _| {

@@ -6,18 +6,42 @@ Authority: the [styled graph contract](../../btop-graph-spec/issues/04-screen-se
 
 **Blocked by:** [01: Prefactor screen output into an opaque, cell-bounded frame](01-opaque-cell-bounded-frame.md).
 
-**Status:** ready-for-agent
+**Status:** closed
 
 **Assignee:** implementer-02 (OpenCode)
 
-- [ ] For graph width W, render the newest at most 2W retained samples chronologically in right-aligned half-cell positions. Older is left and newer is right; the newest occupies the right half of the rightmost cell. One/odd counts leave the unmatched oldest sample's left half blank; no sample is duplicated or manufactured. Genuine zero samples consume real positions.
-- [ ] For each unrounded rate r, positive direction-specific ceiling c, and height H, normalize by clamping r/c to [0,1] and use D = floor(f × 4H + 0.5), bounded to [0,4H]. Fill each half-cell independently bottom-up, using exact nearest-dot halfway-up decisions without fuzzy tolerance or a forced minimum dot. At/above ceiling saturates only that sample, and numeric rates remain uncapped.
-- [ ] Independently implement standard Unicode Braille dot numbering (left top-to-bottom 1,2,3,7; right 4,5,6,8). A zero mask is ASCII space, never U+2800. Full left-only, right-only, and both-half glyphs are exactly `⡇`, `⢸`, and `⣿`.
-- [ ] Emit xterm-256color foreground indices, bottom to top: incoming 60,61,98,140,146,183; outgoing 96,132,133,170,176,219. Select each row's grade as round_half_up(5k/(H−1)) for k from the bottom, independently per direction height. All nonblank graph glyphs in a row share that grade; plain text and spaces remain terminal-default foreground/background, with no background styling.
-- [ ] Preserve the 60×16 full-view threshold, W = width − 30, two-column statistics gap, 28-column statistics blocks, bottom-aligned Curr/Avg/Min/Max/Ttl, stacked labels, and outgoing extra row at odd heights. At 60×16 show 30×6 graphs fitting 60 samples; at 80×24 show 50×10 graphs fitting 100 samples. Add no axes, ticks, time labels, or footer.
-- [ ] Preserve exact baseline, absent, read-failed, measured-idle, and recovered-baseline status/statistics distinctions. Unavailable histories are blank; idle retains older nonzero traffic while new real zero samples shift it left. Small/zero dimensions show only bounded default-style warning/selection/status without palette codes, while acquisition/navigation/quit and growth recovery continue.
-- [ ] Preserve original-byte interface identity and printable-ASCII display escaping, safe ellipsis/position reservation, binary units, exact text rounding, maximum-u64 totals/large ceilings, `[too wide]` overflow text, independent ceiling labels, and text contrast beside colored graphs.
-- [ ] Migrate all twelve existing screen test functions by coverage through the frame interface, replacing byte-offset/ASCII-length assumptions with cell-aware assertions. Cover updated V01–V08: exact glyph boundaries and masks, palettes/grades, one/odd/even histories, delayed observations, fitting suffixes, state transitions, odd geometry, extreme dimensions, names, units, and large values. Affected S03/S07/S09/S11/S12 checks preserve actual observation counts and doubled visible capacity.
-- [ ] Shrink/grow, redraw, navigation, and small-terminal rendering do not mutate or expire history. Monitor retains five minutes and owns observation-driven expiry/resets; cadence remains 500 ms. Document nominally one second per cell at regular cadence and observation-based spacing during delays. Render only the fitting suffix with cost bounded by screen area and visible samples.
-- [ ] Interactive support documentation declares UTF-8 output, Braille font coverage, and xterm-256color assumptions. Preserve terminal stdin/stdout and TERM rejection/exemption rules, including redirected stderr and help/version. Verify accepted full-view sessions always emit colored Braille under `NO_COLOR` and locale declarations; add no probe, guard, ASCII mode, or fallback.
-- [ ] Add no dependency for glyphs, cell accounting, SGR, or palettes, and copy no upstream implementation. Record passing `cargo fmt --check`, `cargo test --locked`, and `cargo build --release --locked`, including applicable Linux PTY protocol coverage and updated case-to-test mappings.
+- [x] For graph width W, render the newest at most 2W retained samples chronologically in right-aligned half-cell positions. Older is left and newer is right; the newest occupies the right half of the rightmost cell. One/odd counts leave the unmatched oldest sample's left half blank; no sample is duplicated or manufactured. Genuine zero samples consume real positions.
+- [x] For each unrounded rate r, positive direction-specific ceiling c, and height H, normalize by clamping r/c to [0,1] and use D = floor(f × 4H + 0.5), bounded to [0,4H]. Fill each half-cell independently bottom-up, using exact nearest-dot halfway-up decisions without fuzzy tolerance or a forced minimum dot. At/above ceiling saturates only that sample, and numeric rates remain uncapped.
+- [x] Independently implement standard Unicode Braille dot numbering (left top-to-bottom 1,2,3,7; right 4,5,6,8). A zero mask is ASCII space, never U+2800. Full left-only, right-only, and both-half glyphs are exactly `⡇`, `⢸`, and `⣿`.
+- [x] Emit xterm-256color foreground indices, bottom to top: incoming 60,61,98,140,146,183; outgoing 96,132,133,170,176,219. Select each row's grade as round_half_up(5k/(H−1)) for k from the bottom, independently per direction height. All nonblank graph glyphs in a row share that grade; plain text and spaces remain terminal-default foreground/background, with no background styling.
+- [x] Preserve the 60×16 full-view threshold, W = width − 30, two-column statistics gap, 28-column statistics blocks, bottom-aligned Curr/Avg/Min/Max/Ttl, stacked labels, and outgoing extra row at odd heights. At 60×16 show 30×6 graphs fitting 60 samples; at 80×24 show 50×10 graphs fitting 100 samples. Add no axes, ticks, time labels, or footer.
+- [x] Preserve exact baseline, absent, read-failed, measured-idle, and recovered-baseline status/statistics distinctions. Unavailable histories are blank; idle retains older nonzero traffic while new real zero samples shift it left. Small/zero dimensions show only bounded default-style warning/selection/status without palette codes, while acquisition/navigation/quit and growth recovery continue.
+- [x] Preserve original-byte interface identity and printable-ASCII display escaping, safe ellipsis/position reservation, binary units, exact text rounding, maximum-u64 totals/large ceilings, `[too wide]` overflow text, independent ceiling labels, and text contrast beside colored graphs.
+- [x] Migrate all twelve existing screen test functions by coverage through the frame interface, replacing byte-offset/ASCII-length assumptions with cell-aware assertions. Cover updated V01–V08: exact glyph boundaries and masks, palettes/grades, one/odd/even histories, delayed observations, fitting suffixes, state transitions, odd geometry, extreme dimensions, names, units, and large values. Affected S03/S07/S09/S11/S12 checks preserve actual observation counts and doubled visible capacity.
+- [x] Shrink/grow, redraw, navigation, and small-terminal rendering do not mutate or expire history. Monitor retains five minutes and owns observation-driven expiry/resets; cadence remains 500 ms. Document nominally one second per cell at regular cadence and observation-based spacing during delays. Render only the fitting suffix with cost bounded by screen area and visible samples.
+- [x] Interactive support documentation declares UTF-8 output, Braille font coverage, and xterm-256color assumptions. Preserve terminal stdin/stdout and TERM rejection/exemption rules, including redirected stderr and help/version. Verify accepted full-view sessions always emit colored Braille under `NO_COLOR` and locale declarations; add no probe, guard, ASCII mode, or fallback.
+- [x] Add no dependency for glyphs, cell accounting, SGR, or palettes, and copy no upstream implementation. Record passing `cargo fmt --check`, `cargo test --locked`, and `cargo build --release --locked`, including applicable Linux PTY protocol coverage and updated case-to-test mappings.
+
+## Comments
+
+### Resolution — 2026-10-08 — implementer-02 (OpenCode)
+
+All eleven criteria passed. Screen now renders the newest fitting 2W samples as
+right-aligned, independently bottom-filled Braille halves, with exact incoming
+and outgoing positional foreground grades and default-style text/blanks. All
+twelve inherited screen functions were migrated through cell-aware frame checks;
+twenty screen tests cover updated V01–V08, with affected sampling/history cases
+mapped to the actual monitor/application tests and doubled presentation capacity.
+
+Required gates passed: `cargo fmt --check`, `cargo test --locked` (104 unit + 14
+PTY/decoder tests), `cargo build --release --locked`, and the complete Linux PTY
+harness against the release executable (14 passed). Real traffic sessions at
+60×16/80×24 emitted both exact palettes under NO_COLOR and the tested locale
+declarations. Integration ancestry was confirmed at clean start `b784de4`; latest
+integration merge returned `Already up to date.` at the same tip.
+
+See [Ticket 02 — paired Braille and direction palettes evidence](../02-evidence.md)
+for red/green execution, exact case/test mappings, compiler/environment, artifact
+SHA-256 and review. No ticket-02 blockers remain. Tickets 03/04 now have their
+colored frame implementation prerequisite; their dedicated transport/visual/live
+verification and ticket 05's final combined acceptance remain open.

@@ -6,12 +6,14 @@ Inspired by [nload](https://github.com/rolandriegel/nload) by Roland Riegel.
 
 ## Implementation status
 
-The application runs a single-interface view with incoming/outgoing graphs,
-traffic statistics and arrow-key navigation through the startup interface list.
-Deterministic module/application-loop checks, automated Linux product PTY checks,
-recorded Alacritty emulator observations and nonprivileged live traffic smoke
-pass. Final acceptance gates and the specification/artifact audit also pass;
-see the [verified implementation handoff](.scratch/nload-rust-implementation/handoff.md).
+The application runs a single-interface view with incoming/outgoing colored
+Braille graphs, traffic statistics and arrow-key navigation through the startup
+interface list. Incoming uses indigo/lavender grades; outgoing uses magenta.
+The [styled graph implementation record](.scratch/btop-graph-implementation/implementation.md)
+links current deterministic and Linux PTY evidence and tracks the remaining
+styled-output and human emulator acceptance work. The earlier
+[verified Rust port handoff](.scratch/nload-rust-implementation/handoff.md)
+records historical ASCII-version acceptance.
 
 ## Build and run
 
@@ -30,14 +32,31 @@ cargo build --release --locked
 ./target/release/nload-rs
 ```
 
-Interactive runs require terminal stdin/stdout and an xterm-compatible `TERM`
-declaration. Use arrows to navigate, q/Q to quit, or Ctrl+C to exit with status
-130. An optional interface name selects the initial view without filtering the
+Interactive runs require terminal stdin/stdout (stderr may be redirected), UTF-8
+output support, a font with Unicode Braille coverage, and xterm-256color support.
+Unset/empty `TERM` and exact `dumb`/`linux` are rejected before terminal mutation;
+other values declare assumed support, without capability or locale probes.
+Full-size views always emit colored Braille, including under `NO_COLOR` and any
+locale declaration. There is no ASCII mode or compatibility fallback. Below
+60×16, a bounded default-style warning replaces the graphs while sampling,
+navigation and quit remain active.
+
+Use arrows to navigate, q/Q to quit, or Ctrl+C to exit with status 130.
+An optional interface name selects the initial view without filtering the
 list. If that name is absent at startup (for example, `wg0` before the VPN starts),
 the first naturally sorted interface is selected silently, just as when no name
 is supplied. Interfaces that appear later are available after restarting.
 Independent `-i VALUE`/`-o VALUE` graph ceilings use integer binary-scaled
 kBit/s; each defaults to 10240, and zero restores that direction's default.
+
+Each graph cell combines two actual current-rate observations, older on the
+left and newer on the right, with independent bottom-up dot fill. The newest
+sample is right-aligned; an unmatched oldest half and measured zero are true
+ASCII blanks. Five minutes of observation-driven history are retained for every
+startup interface, independent of screen size. At the unchanged 500-ms cadence,
+one cell nominally spans one second; delayed observations remain observation
+spaced rather than forming an exact time axis. Shrink/grow and redraw only hide
+or reveal the fitting suffix (60 samples at 60×16, 100 at 80×24).
 
 ```sh
 ./target/release/nload-rs -i 20480 -o 5120 eth0
@@ -45,8 +64,9 @@ kBit/s; each defaults to 10240, and zero restores that direction's default.
 ./target/release/nload-rs --version
 ```
 
-Help/version work with redirected streams. Interactive and live evidence is
-linked from the verification record. Repeatable builds use the recorded compiler
+Help/version work with redirected streams and are exempt from interactive
+terminal requirements. Interactive and live evidence is linked from the
+implementation records. Repeatable builds use the recorded compiler
 and locked dependencies; byte-identical executable output is not promised.
 
 On Linux, `cargo test --locked` also runs the real binary through owned PTYs;

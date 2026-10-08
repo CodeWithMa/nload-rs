@@ -7,6 +7,8 @@
 //! screen frames, and staged restoration (including SGR reset). Unsafe calls stay inside
 //! concrete adapters. The thin application loop connects these effects to pure
 //! modules. Session restoration also covers incomplete initialization.
+//! Accepted TERM declarations assume UTF-8/Braille/xterm-256color support; no
+//! locale, NO_COLOR or capability probe changes the screen's colored output.
 
 mod input;
 mod linux;

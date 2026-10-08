@@ -4,7 +4,11 @@
 //!
 //! Owns geometry, escaping, formatting, graph glyphs and small-terminal mode.
 //! Owns row encoding and default-style resets; terminal owns positioning, clearing
-//! and session commands. This prefactor retains the existing ASCII graph glyphs.
+//! and session commands. Adjacent observations share bottom-filled Braille cells;
+//! graph-row position selects an incoming or outgoing xterm-256color foreground.
+//! Two samples per cell nominally span one second at the unchanged 500-ms cadence;
+//! delayed observations remain observation-spaced. Only the fitting suffix is read.
+//! Interactive output assumes UTF-8, Braille font coverage and xterm-256color.
 
 use crate::monitor::{DirectionView, SelectedView, ViewState};
 
@@ -14,6 +18,8 @@ const STAT_WIDTH: usize = 28;
 const GAP: usize = 2;
 const RATE_UNITS: [&str; 4] = ["Bit/s", "kBit/s", "MBit/s", "GBit/s"];
 const TOTAL_UNITS: [&str; 4] = ["Byte", "kByte", "MByte", "GByte"];
+const INCOMING_PALETTE: [u8; 6] = [60, 61, 98, 140, 146, 183];
+const OUTGOING_PALETTE: [u8; 6] = [96, 132, 133, 170, 176, 219];
 
 /// Only screen construction can establish the logical cell bounds and row protocol.
 /// Encoded rows omit trailing blank cells but retain start/end and statistics resets.
@@ -38,6 +44,7 @@ impl Frame {
 struct Row {
     cells: Vec<char>,
     statistics: Option<usize>,
+    graph_foreground: Option<u8>,
 }
 
 impl Row {
@@ -48,11 +55,29 @@ impl Row {
             .rposition(|&cell| cell != ' ')
             .map_or(0, |i| i + 1);
         let mut encoded = String::from("\x1b[0m");
+        let mut foreground = None;
         for (column, cell) in self.cells[..end].iter().enumerate() {
             if self.statistics == Some(column) {
                 encoded.push_str("\x1b[0m");
+                foreground = None;
+            }
+            let style = if ('\u{2801}'..='\u{28ff}').contains(cell) {
+                self.graph_foreground
+            } else {
+                None
+            };
+            if style != foreground {
+                if let Some(index) = style {
+                    encoded.push_str(&format!("\x1b[38;5;{index}m"));
+                } else {
+                    encoded.push_str("\x1b[0m");
+                }
+                foreground = style;
             }
             encoded.push(*cell);
+        }
+        if foreground.is_some() {
+            encoded.push_str("\x1b[0m");
         }
         if self.statistics.is_some_and(|column| column >= end) {
             encoded.push_str("\x1b[0m");
@@ -69,7 +94,8 @@ pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize) -> Fra
     let mut rows = vec![
         Row {
             cells: vec![' '; width],
-            statistics: None
+            statistics: None,
+            graph_foreground: None,
         };
         height
     ];
@@ -90,8 +116,18 @@ pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize) -> Fra
         }
         let incoming_height = (height - 4) / 2;
         let outgoing_label = 3 + incoming_height;
-        direction(&mut rows[2..outgoing_label], "Incoming", view.incoming);
-        direction(&mut rows[outgoing_label..], "Outgoing", view.outgoing);
+        direction(
+            &mut rows[2..outgoing_label],
+            "Incoming",
+            view.incoming,
+            &INCOMING_PALETTE,
+        );
+        direction(
+            &mut rows[outgoing_label..],
+            "Outgoing",
+            view.outgoing,
+            &OUTGOING_PALETTE,
+        );
     }
     Frame {
         width,
@@ -109,7 +145,7 @@ fn status(state: ViewState) -> Option<&'static str> {
     }
 }
 
-fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>) {
+fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: &[u8; 6]) {
     // Ceilings are exact integer bytes/s, so use widened integer bit conversion.
     put(
         &mut rows[0],
@@ -122,37 +158,45 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>) {
     let graph = &mut rows[1..];
     let height = graph.len();
     let graph_width = graph[0].cells.len() - STAT_WIDTH - GAP;
-    for row in graph.iter_mut() {
+    for (index, row) in graph.iter_mut().enumerate() {
         row.statistics = Some(graph_width + GAP);
+        let k = height - 1 - index;
+        // Integer nearest-grade selection, including exact halfway-up ties.
+        let grade = (10 * k + height - 1) / (2 * (height - 1));
+        row.graph_foreground = Some(palette[grade]);
     }
-    let fitted = view.samples.len().min(graph_width);
-    for (column, sample) in view
+    let capacity = 2 * graph_width;
+    let fitted = view.samples.len().min(capacity);
+    for (offset, sample) in view
         .samples
-        .iter()
-        .skip(view.samples.len() - fitted)
+        .range(view.samples.len() - fitted..)
         .enumerate()
     {
-        let ceiling = view.ceiling as f64;
-        let filled = if sample.rate >= ceiling {
-            height as f64
+        let position = capacity - fitted + offset;
+        let fraction = (sample.rate / view.ceiling as f64).clamp(0.0, 1.0);
+        let dots = ((fraction * (4 * height) as f64 + 0.5).floor() as usize).min(4 * height);
+        // Standard Unicode dot numbers, bottom-to-top in each independent half.
+        let numbers = if position % 2 == 0 {
+            [7, 3, 2, 1]
         } else {
-            // Scale before dividing: division first can move an exact 1.70-cell
-            // fill below its threshold (e.g. 10 * (1.7 / 10)). Monitor rates and
-            // terminal dimensions are far below floating-point overflow here.
-            height as f64 * sample.rate / ceiling
+            [8, 6, 5, 4]
         };
         for (index, row) in graph.iter_mut().enumerate() {
-            let level = (height - 1 - index) as f64;
-            // Compare against thresholds in whole-bar coordinates. Subtracting
-            // the integer level first could turn exactly 1.70 into 0.69999… .
-            row.cells[graph_width - fitted + column] = if filled >= level + 1.0 {
-                '#'
-            } else if filled >= level + 0.70 {
-                '|'
-            } else if filled >= level + 0.30 {
-                '.'
+            let count = dots.saturating_sub(4 * (height - 1 - index)).min(4);
+            let cell = &mut row.cells[position / 2];
+            let mut mask = if *cell == ' ' {
+                0
             } else {
+                *cell as u32 - 0x2800
+            };
+            for number in &numbers[..count] {
+                mask |= 1 << (number - 1);
+            }
+            // U+2800 is deliberately never emitted: zero is ordinary space.
+            *cell = if mask == 0 {
                 ' '
+            } else {
+                char::from_u32(0x2800 + mask).unwrap()
             };
         }
     }
@@ -318,6 +362,26 @@ mod tests {
     }
 
     #[test]
+    fn paired_saturated_halves_and_real_zeros_use_direction_foregrounds() {
+        for (rates, glyphs) in [
+            (vec![1_310_720.0], "⢸"),
+            (vec![1_310_720.0, 0.0], "⡇"),
+            (vec![1_310_720.0, 0.0, 1_310_720.0], "⢸⢸"),
+            (vec![1_310_720.0, 0.0, 1_310_720.0, 2_621_440.0], "⡇⣿"),
+        ] {
+            let history = samples(&rates);
+            let frame = super::render(view(&history), 60, 16);
+            let padding = " ".repeat(30 - glyphs.chars().count());
+            for (row, foreground) in [(3, 183), (10, 219)] {
+                assert_eq!(
+                    frame.encoded_rows()[row],
+                    format!("\x1b[0m{padding}\x1b[38;5;{foreground}m{glyphs}\x1b[0m\x1b[0m\x1b[0m")
+                );
+            }
+        }
+    }
+
+    #[test]
     fn opaque_frame_retains_dimensions_and_encodes_trimmed_default_rows() {
         let history = samples(&[]);
         let frame = super::render(view(&history), 60, 16);
@@ -342,16 +406,18 @@ mod tests {
     fn bounded(rows: &[String], width: usize, height: usize) {
         assert_eq!(rows.len(), height);
         for row in rows {
-            assert_eq!(row.len(), width);
-            assert!(row.bytes().all(|byte| (0x20..=0x7e).contains(&byte)));
+            assert_eq!(row.chars().count(), width);
+            assert!(
+                row.chars()
+                    .all(|c| (' '..='~').contains(&c) || ('\u{2801}'..='\u{28ff}').contains(&c))
+            );
         }
     }
 
-    // Decode only the prefactor's reset subset through the read-only frame seam.
-    // The literal presentation oracles below remain independent of the encoder.
-    fn render(view: SelectedView<'_>, width: usize, height: usize) -> Vec<String> {
-        let frame = super::render(view, width, height);
-        assert_eq!(frame.dimensions(), (width, height));
+    // Test-side whitelist at the frame seam, independent of production encoding.
+    // Only nonblank Braille is colored; all text/space cells must be default.
+    fn decoded(frame: &Frame) -> Vec<Vec<(char, Option<u8>)>> {
+        let (width, height) = frame.dimensions();
         assert_eq!(frame.encoded_rows().len(), height);
         frame
             .encoded_rows()
@@ -359,20 +425,86 @@ mod tests {
             .map(|encoded| {
                 assert!(encoded.starts_with("\x1b[0m"));
                 assert!(encoded.ends_with("\x1b[0m"));
-                let text = encoded.replace("\x1b[0m", "");
-                assert!(text.chars().all(|c| c.is_ascii() && !c.is_ascii_control()));
-                assert!(text.chars().count() <= width);
-                assert!(!text.ends_with(' '));
-                format!("{text:<width$}")
+                let mut remaining = encoded.as_str();
+                let mut foreground = None;
+                let mut cells = Vec::new();
+                while !remaining.is_empty() {
+                    if let Some(sgr) = remaining.strip_prefix("\x1b[") {
+                        let (parameters, rest) = sgr.split_once('m').unwrap();
+                        foreground = if parameters == "0" {
+                            None
+                        } else {
+                            let index = parameters
+                                .strip_prefix("38;5;")
+                                .unwrap()
+                                .parse::<u8>()
+                                .unwrap();
+                            assert!(matches!(
+                                index,
+                                60 | 61 | 98 | 140 | 146 | 183 | 96 | 132 | 133 | 170 | 176 | 219
+                            ));
+                            Some(index)
+                        };
+                        remaining = rest;
+                    } else {
+                        let c = remaining.chars().next().unwrap();
+                        if ('\u{2801}'..='\u{28ff}').contains(&c) {
+                            assert!(foreground.is_some());
+                        } else {
+                            assert!((' '..='~').contains(&c));
+                            assert_eq!(foreground, None, "styled text or blank");
+                        }
+                        cells.push((c, foreground));
+                        remaining = &remaining[c.len_utf8()..];
+                    }
+                }
+                assert_eq!(foreground, None);
+                assert!(cells.len() <= width);
+                assert!(cells.last().is_none_or(|&(c, _)| c != ' '));
+                cells.resize(width, (' ', None));
+                cells
             })
             .collect()
     }
 
-    fn stats(rows: &[String], end: usize, start: usize) -> Vec<&str> {
+    fn render(view: SelectedView<'_>, width: usize, height: usize) -> Vec<String> {
+        let frame = super::render(view, width, height);
+        assert_eq!(frame.dimensions(), (width, height));
+        decoded(&frame)
+            .into_iter()
+            .map(|row| row.into_iter().map(|(c, _)| c).collect())
+            .collect()
+    }
+
+    fn cells(row: &str, start: usize, end: usize) -> String {
+        row.chars().skip(start).take(end - start).collect()
+    }
+
+    fn stats(rows: &[String], end: usize, start: usize) -> Vec<String> {
         rows[end - 5..end]
             .iter()
-            .map(|row| row[start..].trim_end())
+            .map(|row| cells(row, start, row.chars().count()).trim_end().to_owned())
             .collect()
+    }
+
+    fn rendered_rate(rate: f64) -> String {
+        let history = samples(&[rate]);
+        let mut selected = view(&history);
+        selected.incoming.rates.as_mut().unwrap().current = rate;
+        stats(&render(selected, 60, 16), 9, 32)[0]
+            .strip_prefix("Curr: ")
+            .unwrap()
+            .to_owned()
+    }
+
+    fn rendered_total(total: u128) -> String {
+        let history = samples(&[]);
+        let mut selected = view(&history);
+        selected.incoming.total = Some(u64::try_from(total).unwrap());
+        stats(&render(selected, 60, 16), 9, 32)[4]
+            .strip_prefix("Ttl: ")
+            .unwrap()
+            .to_owned()
     }
 
     #[test]
@@ -386,7 +518,7 @@ mod tests {
         expected[13] = "Outgoing: (ceiling 10.00 MBit/s)".to_owned();
         for (start, end) in [(3, 13), (14, 24)] {
             for row in &mut expected[start..end - 5] {
-                *row = format!("{}##", " ".repeat(48));
+                *row = format!("{}⣿", " ".repeat(49));
             }
             for (row, field) in expected[end - 5..end].iter_mut().zip([
                 "Curr: 1.00 kBit/s",
@@ -395,7 +527,7 @@ mod tests {
                 "Max: 4.00 kBit/s",
                 "Ttl: 1.00 kByte",
             ]) {
-                *row = format!("{}###  {field}", " ".repeat(47));
+                *row = format!("{}⢸⣿  {field}", " ".repeat(48));
             }
         }
         let expected: Vec<_> = expected
@@ -419,8 +551,8 @@ mod tests {
             );
             for (start, end) in [(3, outgoing_label), (outgoing_label + 1, height)] {
                 for row in &rows[start..end] {
-                    assert_eq!(row.as_bytes()[width - 31], b'#');
-                    assert_eq!(&row[width - 30..width - 28], "  ");
+                    assert_eq!(cells(row, width - 31, width - 30), "⢸");
+                    assert_eq!(cells(row, width - 30, width - 28), "  ");
                 }
                 assert_eq!(
                     stats(&rows, end, width - 28),
@@ -437,30 +569,183 @@ mod tests {
     }
 
     #[test]
-    fn fractional_cell_thresholds_are_exact_bottom_up_and_saturating() {
-        let fills = [
-            0.0, 0.299_999, 0.30, 0.300_001, 0.699_999, 0.70, 0.700_001, 0.999_999, 1.0, 1.000_001,
-            1.299_999, 1.30, 1.300_001, 1.699_999, 1.70, 1.700_001, 9.999_999, 10.0, 20.0,
-        ];
-        let history = samples(&fills);
-        let mut selected = view(&history);
-        selected.incoming.ceiling = 10;
-        selected.outgoing.ceiling = 10;
-        selected.incoming.rates.as_mut().unwrap().current = 20.0;
-        let rows = render(selected, 80, 24);
-        let bottom = "  ...|||###########";
-        // One glyph per *actual* sample, including the zero and below-threshold
-        // columns. Independently specified whole-bar threshold expectations.
-        assert_eq!(bottom.len(), fills.len());
-        for (top, end) in [(3, 13), (14, 24)] {
-            assert_eq!(&rows[end - 1][50 - fills.len()..50], bottom);
-            assert_eq!(&rows[end - 2][50 - fills.len()..50], "           ...||###");
-            for row in &rows[top..end] {
-                assert_eq!(&row[48..50], "##");
+    fn nearest_dot_half_steps_are_exact_bottom_up_without_minimum_or_tolerance() {
+        // H=6, c=24 makes one byte/s one dot. Literal Unicode masks are
+        // worked from the standard dot diagram, not the production algorithm.
+        let right = [' ', '⢀', '⢠', '⢰', '⢸'];
+        for boundary in 0_usize..24 {
+            let halfway = boundary as f64 + 0.5;
+            for (rate, dots) in [
+                (halfway - 1e-12, boundary),
+                (halfway, boundary + 1),
+                (halfway + 1e-12, boundary + 1),
+            ] {
+                let history = samples(&[rate]);
+                let mut selected = view(&history);
+                selected.incoming.ceiling = 24;
+                selected.outgoing.ceiling = 24;
+                let rows = render(selected, 60, 16);
+                for (top, end) in [(3, 9), (10, 16)] {
+                    let actual: String = rows[top..end]
+                        .iter()
+                        .map(|row| row.chars().nth(29).unwrap())
+                        .collect();
+                    let expected: String = (0..6)
+                        .rev()
+                        .map(|k| right[dots.saturating_sub(4 * k).min(4)])
+                        .collect();
+                    assert_eq!(actual, expected, "rate {rate:?}, dots {dots}");
+                }
             }
-            assert_eq!(&rows[top][47..48], "|");
         }
-        assert_eq!(rows[8][52..].trim_end(), "Curr: 160.00 Bit/s");
+        for (rate, expected) in [
+            (0.0, "      "),
+            (1e-15, "      "),
+            (12.0, "   ⢸⢸⢸"),
+            (24.0, "⢸⢸⢸⢸⢸⢸"),
+            (48.0, "⢸⢸⢸⢸⢸⢸"),
+        ] {
+            let history = samples(&[rate]);
+            let mut selected = view(&history);
+            selected.incoming.ceiling = 24;
+            let rows = render(selected, 60, 16);
+            let actual: String = rows[3..9]
+                .iter()
+                .map(|row| row.chars().nth(29).unwrap())
+                .collect();
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn standard_braille_masks_cover_every_bottom_filled_half_combination() {
+        let masks = [
+            [' ', '⢀', '⢠', '⢰', '⢸'],
+            ['⡀', '⣀', '⣠', '⣰', '⣸'],
+            ['⡄', '⣄', '⣤', '⣴', '⣼'],
+            ['⡆', '⣆', '⣦', '⣶', '⣾'],
+            ['⡇', '⣇', '⣧', '⣷', '⣿'],
+        ];
+        for (left, expected) in masks.iter().enumerate() {
+            for (right, &glyph) in expected.iter().enumerate() {
+                let history = samples(&[left as f64, right as f64]);
+                let mut selected = view(&history);
+                selected.incoming.ceiling = 24;
+                let rows = render(selected, 60, 16);
+                assert_eq!(cells(&rows[8], 29, 30), glyph.to_string());
+                assert!(
+                    rows[3..8]
+                        .iter()
+                        .all(|row| cells(row, 0, 30) == " ".repeat(30))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn independent_half_and_direction_quantization_preserves_uncapped_text() {
+        let history = samples(&[2.0, 28.0]);
+        let mut selected = view(&history);
+        selected.incoming.ceiling = 24;
+        selected.outgoing.ceiling = 48;
+        selected.incoming.rates.as_mut().unwrap().current = 28.0;
+        let rows = render(selected, 60, 16);
+        let incoming: String = rows[3..9]
+            .iter()
+            .map(|row| row.chars().nth(29).unwrap())
+            .collect();
+        let outgoing: String = rows[10..16]
+            .iter()
+            .map(|row| row.chars().nth(29).unwrap())
+            .collect();
+        assert_eq!(incoming, "⢸⢸⢸⢸⢸⣼");
+        assert_eq!(outgoing, "  ⢠⢸⢸⣸");
+        assert_eq!(stats(&rows, 9, 32)[0], "Curr: 224.00 Bit/s");
+        assert_eq!(rows[2].trim_end(), "Incoming: (ceiling 192.00 Bit/s)");
+        assert_eq!(rows[9].trim_end(), "Outgoing: (ceiling 384.00 Bit/s)");
+    }
+
+    #[test]
+    fn odd_graph_heights_quantize_half_ceiling_and_first_half_dot_independently() {
+        for (width, height, ceiling, incoming, outgoing) in [
+            (61, 17, 48, "   ⢸⢸⢸", "   ⢠⢸⢸⢸"),
+            (81, 25, 80, "     ⢸⢸⢸⢸⢸", "     ⢠⢸⢸⢸⢸⢸"),
+        ] {
+            let history = samples(&[0.0, ceiling as f64 / 2.0]);
+            let mut selected = view(&history);
+            selected.incoming.ceiling = ceiling;
+            selected.outgoing.ceiling = ceiling;
+            let rows = render(selected, width, height);
+            let incoming_end = 3 + (height - 4) / 2;
+            let column = width - 31;
+            for (start, end, expected) in [
+                (3, incoming_end, incoming),
+                (incoming_end + 1, height, outgoing),
+            ] {
+                let actual: String = rows[start..end]
+                    .iter()
+                    .map(|row| row.chars().nth(column).unwrap())
+                    .collect();
+                assert_eq!(actual, expected);
+            }
+            // With c=8H, rate 1 is the first half-dot boundary in each graph.
+            // Test true normalization at distinct positive ceilings, not c=4H.
+            for (rate, expected) in [(1.0 - 1e-12, ' '), (1.0, '⢀'), (1.0 + 1e-12, '⢀')] {
+                let history = samples(&[rate]);
+                let mut selected = view(&history);
+                selected.incoming.ceiling = 8 * (incoming_end - 3) as u64;
+                selected.outgoing.ceiling = 8 * (height - incoming_end - 1) as u64;
+                let rows = render(selected, width, height);
+                assert_eq!(rows[incoming_end - 1].chars().nth(column), Some(expected));
+                assert_eq!(rows[height - 1].chars().nth(column), Some(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn positional_palettes_use_each_direction_height_and_leave_text_default() {
+        let history = samples(&[1_310_720.0, 0.0, 655_360.0, 1_310_720.0]);
+        for (height, incoming, outgoing) in [
+            (
+                16,
+                vec![183, 146, 140, 98, 61, 60],
+                vec![219, 176, 170, 133, 132, 96],
+            ),
+            (
+                17,
+                vec![183, 146, 140, 98, 61, 60],
+                vec![219, 176, 170, 170, 133, 132, 96],
+            ),
+            (
+                24,
+                vec![183, 146, 146, 140, 140, 98, 98, 61, 61, 60],
+                vec![219, 176, 176, 170, 170, 133, 133, 132, 132, 96],
+            ),
+            // H=11 has exact half-grade ties; ties rise rather than to even.
+            (
+                25,
+                vec![183, 146, 146, 140, 140, 98, 98, 61, 61, 60],
+                vec![219, 219, 176, 176, 170, 170, 133, 133, 132, 132, 96],
+            ),
+        ] {
+            let width = if height < 24 { 60 } else { 80 };
+            let frame = super::render(view(&history), width, height);
+            let rows = decoded(&frame);
+            let outgoing_label = 3 + incoming.len();
+            for (start, palette) in [(3, incoming), (outgoing_label + 1, outgoing)] {
+                for (row, color) in rows[start..start + palette.len()].iter().zip(palette) {
+                    assert!(row.iter().any(|&(c, _)| c != ' ' && !c.is_ascii()));
+                    for &(c, foreground) in row {
+                        assert_eq!(foreground, if c.is_ascii() { None } else { Some(color) });
+                    }
+                }
+            }
+            // Explicit reset at the gap and again at the statistics boundary.
+            assert!(frame.encoded_rows()[outgoing_label - 5].contains("\x1b[0m  \x1b[0mCurr:"));
+            for row in [0, 1, 2, outgoing_label] {
+                assert!(!frame.encoded_rows()[row].contains("38;5;"));
+            }
+        }
     }
 
     #[test]
@@ -474,24 +759,24 @@ mod tests {
             (1.005_001 / 8.0, "1.01 Bit/s"),
             (1024_f64.powi(4) / 8.0, "1024.00 GBit/s"),
         ] {
-            assert_eq!(format_rate(rate), expected, "{rate:?}");
+            assert_eq!(rendered_rate(rate), expected, "{rate:?}");
         }
         for index in 1..=3 {
             let boundary = 1024_f64.powi(index as i32);
             assert_eq!(
-                format_rate((boundary - boundary * 1e-7) / 8.0),
+                rendered_rate((boundary - boundary * 1e-7) / 8.0),
                 format!("1024.00 {}", RATE_UNITS[index - 1])
             );
             assert_eq!(
-                format_rate(boundary / 8.0),
+                rendered_rate(boundary / 8.0),
                 format!("1.00 {}", RATE_UNITS[index])
             );
             assert_eq!(
-                format_rate((boundary + boundary * 1e-7) / 8.0),
+                rendered_rate((boundary + boundary * 1e-7) / 8.0),
                 format!("1.00 {}", RATE_UNITS[index])
             );
             assert_eq!(
-                format_rate(1.125 * boundary / 8.0),
+                rendered_rate(1.125 * boundary / 8.0),
                 format!("1.13 {}", RATE_UNITS[index])
             );
         }
@@ -507,25 +792,25 @@ mod tests {
             (1152, "1.13 kByte"),
             (u64::MAX, "17179869184.00 GByte"),
         ] {
-            assert_eq!(format_integer(u128::from(total), &TOTAL_UNITS), expected);
+            assert_eq!(rendered_total(u128::from(total)), expected);
         }
         for index in 1..=3 {
             let boundary = 1024_u128.pow(index as u32);
             let below = if index == 1 { "1023.00" } else { "1024.00" };
             assert_eq!(
-                format_integer(boundary - 1, &TOTAL_UNITS),
+                rendered_total(boundary - 1),
                 format!("{below} {}", TOTAL_UNITS[index - 1])
             );
             assert_eq!(
-                format_integer(boundary, &TOTAL_UNITS),
+                rendered_total(boundary),
                 format!("1.00 {}", TOTAL_UNITS[index])
             );
             assert_eq!(
-                format_integer(boundary + 1, &TOTAL_UNITS),
+                rendered_total(boundary + 1),
                 format!("1.00 {}", TOTAL_UNITS[index])
             );
             assert_eq!(
-                format_integer(boundary * 9 / 8, &TOTAL_UNITS),
+                rendered_total(boundary * 9 / 8),
                 format!("1.13 {}", TOTAL_UNITS[index])
             );
         }
@@ -533,14 +818,8 @@ mod tests {
         // straddles a hundredth rounding boundary at the capped G prefix.
         let base = 16_777_216_u128 * 1024_u128.pow(3);
         let halfway = (1024_u128.pow(3) * 5).div_ceil(1000);
-        assert_eq!(
-            format_integer(base + halfway - 1, &TOTAL_UNITS),
-            "16777216.00 GByte"
-        );
-        assert_eq!(
-            format_integer(base + halfway, &TOTAL_UNITS),
-            "16777216.01 GByte"
-        );
+        assert_eq!(rendered_total(base + halfway - 1), "16777216.00 GByte");
+        assert_eq!(rendered_total(base + halfway), "16777216.01 GByte");
     }
 
     #[test]
@@ -569,9 +848,9 @@ mod tests {
                 "Ttl: 1.00 kByte",
             ]
         );
-        assert_eq!(rows[19][52..].trim_end(), "Curr: 20.00 MBit/s");
+        assert_eq!(stats(&rows, 24, 52)[0], "Curr: 20.00 MBit/s");
         for row in rows[3..13].iter().chain(&rows[14..24]) {
-            assert_eq!(&row[49..50], "#");
+            assert_eq!(cells(row, 49, 50), "⢸");
         }
     }
 
@@ -620,7 +899,7 @@ mod tests {
             );
         }
         for row in rows[3..9].iter().chain(&rows[10..16]) {
-            assert_eq!(&row[29..30], "#");
+            assert_eq!(cells(row, 29, 30), "⢸");
         }
     }
 
@@ -640,7 +919,7 @@ mod tests {
                     assert!(
                         rows[end - 10..end]
                             .iter()
-                            .all(|row| row[..50] == " ".repeat(50))
+                            .all(|row| cells(row, 0, 50) == " ".repeat(50))
                     );
                 }
                 bounded(&rows, 80, 24);
@@ -672,7 +951,7 @@ mod tests {
             assert!(
                 idle[end - 10..end]
                     .iter()
-                    .all(|row| row[..50] == " ".repeat(50))
+                    .all(|row| cells(row, 0, 50) == " ".repeat(50))
             );
         }
         monitor.observe(1_000_000_000, |_| CounterOutcome::Absent);
@@ -701,11 +980,62 @@ mod tests {
             "Ttl: 4.00 kByte",
             "Ttl: 8.00 kByte",
         );
+        monitor.observe(3_000_000_000, |_| {
+            CounterOutcome::Readable(Counters {
+                incoming: 8192,
+                outgoing: 16384,
+            })
+        });
+        monitor.observe(4_000_000_000, |_| {
+            CounterOutcome::Readable(Counters {
+                incoming: 1024,
+                outgoing: 20000,
+            })
+        });
+        check(
+            &monitor,
+            "Waiting for rate sample",
+            "Ttl: 1.00 kByte",
+            "Ttl: 19.53 kByte",
+        );
+    }
+
+    #[test]
+    fn measured_idle_shifts_older_traffic_by_real_blank_half_cells() {
+        let mut monitor = monitor(
+            b"eth0".to_vec(),
+            Ceilings {
+                incoming: 100,
+                outgoing: 100,
+            },
+            0,
+            0,
+        );
+        for (seconds, expected) in [(2, " ⢸"), (4, " ⡇"), (6, "⢸ ")] {
+            monitor.observe(seconds * 1_000_000_000, |_| {
+                CounterOutcome::Readable(Counters {
+                    incoming: 200,
+                    outgoing: 200,
+                })
+            });
+            let rows = render(monitor.selected_view(), 60, 16);
+            for row in rows[3..9].iter().chain(&rows[10..16]) {
+                assert_eq!(cells(row, 28, 30), expected);
+            }
+            if seconds > 2 {
+                assert_eq!(stats(&rows, 9, 32)[0], "Curr: 0.00 Bit/s");
+                assert_eq!(rows[1], "=".repeat(60));
+            }
+            assert_eq!(
+                monitor.selected_view().incoming.samples.len(),
+                seconds as usize / 2
+            );
+        }
     }
 
     #[test]
     fn raw_names_are_ascii_escaped_shortened_and_keep_position() {
-        let history = samples(&[0.0]);
+        let history = samples(&[1_310_720.0]);
         let mut selected = view(&history);
         selected.name = b"eth\x00\x1b\x7f\x80\xff";
         let rows = render(selected, 60, 16);
@@ -731,7 +1061,7 @@ mod tests {
 
     #[test]
     fn small_and_zero_dimensions_show_only_bounded_warning_selection_status() {
-        let history = samples(&[0.0]);
+        let history = samples(&[1_310_720.0]);
         let mut selected = view(&history);
         for state in [
             ViewState::Baseline,
@@ -749,8 +1079,16 @@ mod tests {
                 (80, 0),
                 (2, 2),
                 (3, 3),
+                (1, 1000),
+                (1000, 1),
             ] {
                 let rows = render(selected, width, height);
+                assert!(
+                    super::render(selected, width, height)
+                        .encoded_rows()
+                        .iter()
+                        .all(|row| !row.contains("38;5;"))
+                );
                 bounded(&rows, width, height);
                 if width >= 59 && height >= 3 {
                     assert_eq!(rows[0].trim_end(), "Terminal too small (need 60x16)");
@@ -786,7 +1124,7 @@ mod tests {
                 200
             };
             // Two-second observations give a full or genuinely zero current-rate
-            // column, without fabricating catch-up samples for the delayed round.
+            // half-cell, without fabricating catch-up samples for delayed rounds.
             monitor.observe(index * 2_000_000_000, |_| {
                 CounterOutcome::Readable(Counters {
                     incoming: total,
@@ -796,16 +1134,24 @@ mod tests {
         }
         let before = format!("{:?}", monitor.selected_view());
         let wide = render(monitor.selected_view(), 100, 24);
-        assert_eq!(&wide[12][..70], format!("{}##", "# ".repeat(34)));
+        assert_eq!(
+            cells(&wide[12], 0, 70),
+            format!("{}{}⣿", " ".repeat(35), "⡇".repeat(34))
+        );
         let narrow = render(monitor.selected_view(), 60, 16);
         // The distinct last pair detects an oldest-prefix or reversed-history
         // renderer, which a purely periodic alternating fixture would miss.
-        assert_eq!(&narrow[8][..30], format!("{}##", "# ".repeat(14)));
+        assert_eq!(cells(&narrow[8], 0, 30), format!("{}⣿", "⡇".repeat(29)));
         let small = render(monitor.selected_view(), 59, 15);
         assert!(small[0].starts_with("Terminal too small"));
         assert_eq!(render(monitor.selected_view(), 100, 24), wide);
         assert_eq!(format!("{:?}", monitor.selected_view()), before);
         assert_eq!(monitor.selected_view().incoming.samples.len(), 70);
+        let standard = render(monitor.selected_view(), 80, 24);
+        assert_eq!(
+            cells(&standard[12], 0, 50),
+            format!("{}{}⣿", " ".repeat(15), "⡇".repeat(34))
+        );
 
         let short = samples(&[100.0, 0.0, 100.0]);
         let mut selected = view(&short);
@@ -813,7 +1159,49 @@ mod tests {
         selected.outgoing.ceiling = 100;
         let rows = render(selected, 60, 16);
         for row in rows[3..9].iter().chain(&rows[10..16]) {
-            assert_eq!(&row[..30], format!("{}# #", " ".repeat(27)));
+            assert_eq!(cells(row, 0, 30), format!("{}⢸⢸", " ".repeat(28)));
+        }
+    }
+
+    #[test]
+    fn fitting_suffix_displays_sixty_or_one_hundred_of_actual_retained_observations() {
+        let mut monitor = monitor(
+            b"eth0".to_vec(),
+            Ceilings {
+                incoming: 100,
+                outgoing: 100,
+            },
+            0,
+            0,
+        );
+        let mut total = 0;
+        for index in 1..=101 {
+            if index == 1 || (42..=100).contains(&index) {
+                total += 200;
+            }
+            monitor.observe(index * 2_000_000_000, |_| {
+                CounterOutcome::Readable(Counters {
+                    incoming: total,
+                    outgoing: total,
+                })
+            });
+        }
+        let before = format!("{:?}", monitor.selected_view());
+        for (width, height, expected) in [
+            (60, 16, format!("{}⡇", "⣿".repeat(29))),
+            (80, 24, format!("{}{}⡇", " ".repeat(20), "⣿".repeat(29))),
+            (81, 25, format!("⢸{}{}⡇", " ".repeat(20), "⣿".repeat(29))),
+        ] {
+            let rows = render(monitor.selected_view(), width, height);
+            let incoming_end = 3 + (height - 4) / 2;
+            for row in rows[3..incoming_end]
+                .iter()
+                .chain(&rows[incoming_end + 1..height])
+            {
+                assert_eq!(cells(row, 0, width - 30), expected);
+            }
+            assert_eq!(monitor.selected_view().incoming.samples.len(), 101);
+            assert_eq!(format!("{:?}", monitor.selected_view()), before);
         }
     }
 
@@ -856,8 +1244,8 @@ mod tests {
         );
         let rows = render(monitor.selected_view(), 60, 16);
         assert_eq!(rows[0].trim_end(), "Interface eth1 (2/2)");
-        assert_eq!(&rows[8][..30], format!("{}###", " ".repeat(27)));
-        assert_eq!(rows[4][32..].trim_end(), "Curr: 800.00 Bit/s");
+        assert_eq!(cells(&rows[8], 0, 30), format!("{}⢸⣿", " ".repeat(28)));
+        assert_eq!(stats(&rows, 9, 32)[0], "Curr: 800.00 Bit/s");
         assert_eq!(monitor.selected_view().incoming.samples.len(), 3);
     }
 }

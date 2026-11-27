@@ -53,6 +53,22 @@ jobs:
           install -m 644 LICENSE THIRD-PARTY-NOTICES.md "$staging/"
           tar -czf "$archive" -C "$staging" nload-rs LICENSE THIRD-PARTY-NOTICES.md
           sha256sum "$archive" > "$archive.sha256"
+      - name: Package and verify corresponding source
+        run: |
+          archive=nload-rs-source.tar.gz
+          staging="$(mktemp -d)"
+          git archive --prefix=nload-rs-source/ HEAD | tar -xf - -C "$staging"
+          (
+            cd "$staging/nload-rs-source"
+            mkdir -p .cargo
+            cargo +stable vendor --locked > .cargo/config.toml
+          )
+          tar -czf "$archive" -C "$staging" nload-rs-source
+
+          verification="$(mktemp -d)"
+          tar -xzf "$archive" -C "$verification"
+          cd "$verification/nload-rs-source"
+          CARGO_HOME="$verification/cargo-home" cargo +stable build --release --locked --offline
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,4 +76,5 @@ jobs:
         run: |
           gh release create "$RELEASE_TAG" \
             nload-rs-linux-x86_64.tar.gz nload-rs-linux-x86_64.tar.gz.sha256 \
+            nload-rs-source.tar.gz \
             --verify-tag --generate-notes

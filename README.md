@@ -10,9 +10,7 @@ and per-interface statistics.
 ## Install
 
 Download `nload-rs-linux-x86_64.tar.gz` and its `.sha256` file from
-[GitHub Releases](https://github.com/CodeWithMa/nload-rs/releases). The binary
-is built on `x86_64` Ubuntu 22.04 and requires glibc, not Rust. If no release
-is available yet, [build from source](#build-from-source).
+[GitHub Releases](https://github.com/CodeWithMa/nload-rs/releases).
 
 ```sh
 sha256sum -c nload-rs-linux-x86_64.tar.gz.sha256 &&
@@ -24,8 +22,14 @@ Run `./nload-rs` from the extraction directory, or move it onto your `PATH`.
 ## Quick start
 
 Press the arrow keys to switch interfaces and `q` to quit. The graphs use your
-terminal’s foreground color by default. To enable color and start on a specific
-interface:
+terminal’s foreground color by default. To enable color and start on `lo`, run
+this from the extraction directory:
+
+```sh
+./nload-rs --color lo
+```
+
+If `nload-rs` is on your `PATH`, run:
 
 ```sh
 nload-rs --color lo
@@ -46,7 +50,10 @@ Use a terminal at least 60×16 with UTF-8 and a font that renders Braille.
 
 ## Build from source
 
-From this checkout, with stable Rust that supports edition 2024:
+Use this checkout or extract `nload-rs-source.tar.gz` from
+[GitHub Releases](https://github.com/CodeWithMa/nload-rs/releases). The release
+archive includes the locked dependencies and can be built offline. From the
+source directory, with stable Rust that supports edition 2024:
 
 ```sh
 cargo install --path . --locked
@@ -79,7 +86,8 @@ pseudoterminal (PTY).
 
 To cut a release, push a `v` tag matching the version in `Cargo.toml` (for
 example, `v0.1.4` for version `0.1.4`). The Linux workflow runs the tests,
-checks the release binary, and publishes the archive and checksum.
+checks the release binary, and publishes the binary archive, its checksum, and
+the corresponding source archive.
 
 ## Credits and license
 

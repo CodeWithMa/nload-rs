@@ -11,21 +11,13 @@ Braille graphs, traffic statistics and arrow-key navigation through a naturally
 sorted interface collection that grows as interfaces appear during monitoring.
 Graphs use the terminal's default foreground unless `--color` is supplied.
 With colors enabled, incoming uses indigo/lavender grades; outgoing uses magenta.
-The [verified styled graph handoff](.scratch/btop-graph-implementation/handoff.md)
-links completed build, deterministic, Linux PTY, human emulator, live-traffic,
-and artifact acceptance for version 0.1.1. The
-[implementation record](.scratch/btop-graph-implementation/implementation.md)
-retains the ticket resolutions and evidence history. The earlier
-[verified Rust port handoff](.scratch/nload-rust-implementation/handoff.md)
-records historical ASCII-version acceptance.
+The [0.1.1 graph handoff](https://github.com/CodeWithMa/nload-rs/blob/c3ae462db5283bbe3eefdaa9112c86e7829b281e/.scratch/btop-graph-implementation/handoff.md)
+records the original styled graph verification.
 
 ## Build and run
 
 Use stable Rust with edition 2024 support on Linux. `Cargo.toml` is the sole
 package-version authority; `Cargo.lock` records the selected dependency versions.
-The application was verified with rustc 1.98.1 and Cargo 1.98.0 on
-`x86_64-unknown-linux-gnu`. Exact toolchain details and check outcomes are recorded
-in the [final styled graph verification record](.scratch/btop-graph-implementation/05-evidence.md).
 
 From the repository root:
 
@@ -80,9 +72,8 @@ or reveal the fitting suffix (60 samples at 60×16, 100 at 80×24).
 ```
 
 Help/version work with redirected streams and are exempt from interactive
-terminal requirements. Interactive and live evidence is linked from the
-implementation records. Repeatable builds use the recorded compiler
-and locked dependencies; byte-identical executable output is not promised.
+terminal requirements. Locked dependencies do not guarantee byte-identical
+executables across builds.
 
 On Linux, `cargo test --locked` also runs the real binary through owned PTYs;
 these tests require accessible `/proc` and PTY allocation, without administrative
@@ -99,20 +90,9 @@ Screen constructs opaque frames with their own dimensions, bounded terminal
 cells, Braille/palette encoding, and default-style row/statistics resets. Terminal
 owns default-style clearing, positioning, nonblocking byte-exact output, and
 staged restoration, including cancel/reset before showing the cursor and leaving
-the alternate screen. The
-[newer styled graph contract](.scratch/btop-graph-spec/spec.md#supersession-index)
-supersedes the historical ASCII thresholds, one-sample-per-cell presentation,
-ASCII-row interface, and affected output/restoration promises. Graph presentation
-is inspired by btop and implemented independently from standard Unicode/ANSI
-facts, without adding dependencies.
-The current default-off color policy supersedes that contract's always-colored
-output: `--color` restores the styled graphs, while default-style resets remain
-part of the frame and restoration protocols in both modes.
-
-The [dynamic interface discovery specification](.scratch/dynamic-interface-discovery/spec.md)
-supersedes the historical Rust-port promises of startup-only membership and
-forgotten absent startup requests. Its [implementation record](.scratch/dynamic-interface-discovery/implementation.md)
-records acceptance coverage and verification for the current behavior.
+the alternate screen. Default-style resets apply with or without color.
+Graph presentation is inspired by btop and implemented independently using
+Unicode and ANSI escape sequences, without adding dependencies.
 
 ## Arch Linux installation
 

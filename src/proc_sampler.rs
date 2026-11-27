@@ -166,7 +166,8 @@ impl Snapshot {
         self.counters.keys().map(Vec::as_slice)
     }
 
-    /// An absent request starts on the first entry and remains pending.
+    /// Start on the first entry if no interface was requested or the requested
+    /// interface is missing. Only a missing requested interface remains pending.
     pub(crate) fn startup(
         &self,
         requested: Option<&[u8]>,

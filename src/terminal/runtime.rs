@@ -117,6 +117,7 @@ impl<O: RuntimeEffects> Runtime<O> {
     }
 
     /// Replace an untouched frame. Return false if a partial frame must finish first.
+    #[must_use = "retry the redraw if a partial frame is still being written"]
     pub(crate) fn queue_frame(&mut self, frame: &Frame) -> bool {
         if self.frame.as_ref().is_some_and(|frame| frame.emitted != 0) {
             return false;

@@ -181,8 +181,8 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: Op
         } else {
             [8, 6, 5, 4]
         };
-        for (index, row) in graph.iter_mut().rev().take(dots.div_ceil(4)).enumerate() {
-            let count = (dots - 4 * index).min(4);
+        for (row_from_bottom, row) in graph.iter_mut().rev().take(dots.div_ceil(4)).enumerate() {
+            let count = (dots - 4 * row_from_bottom).min(4);
             let cell = &mut row.cells[position / 2];
             let mut mask = if *cell == ' ' {
                 0

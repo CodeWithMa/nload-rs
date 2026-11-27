@@ -1,0 +1,62 @@
+name: Linux
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v[0-9]*']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+      - name: Check formatting
+        run: cargo +stable fmt --check
+      - name: Run tests
+        run: cargo +stable test --locked
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: check
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build and test the release binary
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable build --release --locked
+          binary="$PWD/target/release/nload-rs"
+          if [[ "$("$binary" --version)" != "nload-rs ${RELEASE_TAG#v}" ]]; then
+            echo "Release tag must match the binary version (v followed by the Cargo version)." >&2
+            exit 1
+          fi
+          NLOAD_RS_PTY_BINARY="$binary" cargo +stable test --release --locked --test linux_pty
+      - name: Package the binary
+        run: |
+          staging="$(mktemp -d)"
+          install -m 755 target/release/nload-rs "$staging/"
+          install -m 644 LICENSE THIRD-PARTY-NOTICES.md "$staging/"
+          tar -czf nload-rs-linux-x86_64.tar.gz -C "$staging" nload-rs LICENSE THIRD-PARTY-NOTICES.md
+          sha256sum nload-rs-linux-x86_64.tar.gz > nload-rs-linux-x86_64.tar.gz.sha256
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            nload-rs-linux-x86_64.tar.gz nload-rs-linux-x86_64.tar.gz.sha256 \
+            --verify-tag --generate-notes

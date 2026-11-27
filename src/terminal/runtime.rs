@@ -2,6 +2,8 @@
 
 use std::io;
 
+use crate::screen::Frame;
+
 use super::input::Decoder;
 use super::{Notifications, Shutdown};
 
@@ -114,14 +116,10 @@ impl<O: RuntimeEffects> Runtime<O> {
         }
     }
 
-    /// False means an emitted frame must finish: leave the application's latest
-    /// redraw request dirty, and render the latest view after that frame finishes.
-    /// Screen alone establishes bounds and row encoding. Copy its encoded rows
-    /// verbatim; only clearing, positioning and resumable byte offsets live here.
-    /// This owns exactly one frame, not a queue of already stale views.
-    pub(crate) fn queue_frame(&mut self, frame: &crate::screen::Frame) -> io::Result<bool> {
+    /// Replace an untouched frame. Return false if a partial frame must finish first.
+    pub(crate) fn queue_frame(&mut self, frame: &Frame) -> bool {
         if self.frame.as_ref().is_some_and(|frame| frame.emitted != 0) {
-            return Ok(false);
+            return false;
         }
         let (width, _) = frame.dimensions();
         // No LF/CR and no character beyond the supplied right margin. Absolute
@@ -135,7 +133,7 @@ impl<O: RuntimeEffects> Runtime<O> {
         }
         bytes.extend_from_slice(b"\x1b[H");
         self.frame = Some(PendingOutput { bytes, emitted: 0 });
-        Ok(true)
+        true
     }
 
     pub(crate) fn has_pending_output(&self) -> bool {
@@ -178,10 +176,7 @@ impl<O: RuntimeEffects> Runtime<O> {
 impl<O: RuntimeEffects> Clock for Runtime<O> {
     fn now(&mut self) -> io::Result<u64> {
         let now = self.effects.now()?;
-        if self
-            .previous_time
-            .is_some_and(|previous| now.checked_sub(previous).is_none())
-        {
+        if self.previous_time.is_some_and(|previous| now < previous) {
             return Err(io::Error::other("BOOTTIME clock moved backwards"));
         }
         self.previous_time = Some(now);

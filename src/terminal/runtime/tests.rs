@@ -77,11 +77,11 @@ fn every_colored_frame_byte_boundary_resumes_exactly_before_the_latest_frame() {
         for split in 1..expected.len() {
             let effects = ScriptedEffects::default();
             let mut runtime = Runtime::new(effects.clone());
-            assert!(runtime.queue_frame(&first).unwrap());
+            assert!(runtime.queue_frame(&first));
             effects.script.borrow_mut().writes.push_back(Ok(split));
             runtime.output_batch().unwrap();
             assert_eq!(effects.script.borrow().emitted, expected[..split]);
-            assert!(!runtime.queue_frame(&latest).unwrap());
+            assert!(!runtime.queue_frame(&latest));
             effects
                 .script
                 .borrow_mut()
@@ -90,14 +90,14 @@ fn every_colored_frame_byte_boundary_resumes_exactly_before_the_latest_frame() {
             runtime.output_batch().unwrap();
             assert_eq!(effects.script.borrow().emitted, expected[..split]);
             assert_eq!(feed(&mut runtime, &effects, b"\x1b[C", 0), [Event::Forward]);
-            assert!(!runtime.queue_frame(&latest).unwrap());
+            assert!(!runtime.queue_frame(&latest));
             // A second short write proves the offset survives multiple batches.
             effects.script.borrow_mut().writes.push_back(Ok(1));
             runtime.output_batch().unwrap();
             runtime.output_batch().unwrap();
             assert!(!runtime.has_pending_output());
             assert_eq!(effects.script.borrow().emitted, expected);
-            assert!(runtime.queue_frame(&latest).unwrap());
+            assert!(runtime.queue_frame(&latest));
             runtime.output_batch().unwrap();
             assert_eq!(
                 effects.script.borrow().emitted,
@@ -116,7 +116,7 @@ fn untouched_colored_frames_replace_after_transients_and_large_frames_yield_each
         (b"obsolete".as_slice(), io::ErrorKind::WouldBlock),
         (b"also obsolete".as_slice(), io::ErrorKind::Interrupted),
     ] {
-        assert!(runtime.queue_frame(&colored_frame(name, 60, 16)).unwrap());
+        assert!(runtime.queue_frame(&colored_frame(name, 60, 16)));
         effects
             .script
             .borrow_mut()
@@ -128,7 +128,7 @@ fn untouched_colored_frames_replace_after_transients_and_large_frames_yield_each
     let latest = colored_frame(b"latest", 1000, 1000);
     let expected = wire(&latest);
     assert!(expected.len() > 16 * 1024);
-    assert!(runtime.queue_frame(&latest).unwrap());
+    assert!(runtime.queue_frame(&latest));
     for _ in 0..expected.len().div_ceil(16 * 1024) {
         assert!(runtime.has_pending_output());
         let before = effects.script.borrow().calls.len();
@@ -159,27 +159,23 @@ fn screen_frames_clear_in_default_style_and_keep_row_resets_and_cell_bounds() {
         (80, 0, "\x1b[0m\x1b[H\x1b[2J\x1b[H"),
     ] {
         effects.script.borrow_mut().emitted.clear();
-        assert!(
-            runtime
-                .queue_frame(&frame(b"eth\x1b[31m", width, height))
-                .unwrap()
-        );
+        assert!(runtime.queue_frame(&frame(b"eth\x1b[31m", width, height)));
         runtime.output_batch().unwrap();
         assert_eq!(effects.script.borrow().emitted, expected.as_bytes());
     }
 }
 
 #[test]
-fn every_prefactor_protocol_byte_boundary_resumes_exactly_without_interleaving() {
+fn every_small_frame_byte_boundary_resumes_exactly_without_interleaving() {
     let expected = b"\x1b[0m\x1b[H\x1b[2J\x1b[1;1H\x1b[0mT\x1b[0m\x1b[H";
     for split in 1..expected.len() {
         let effects = ScriptedEffects::default();
         let mut runtime = Runtime::new(effects.clone());
-        runtime.queue_frame(&frame(b"eth0", 1, 1)).unwrap();
+        assert!(runtime.queue_frame(&frame(b"eth0", 1, 1)));
         effects.script.borrow_mut().writes.push_back(Ok(split));
         runtime.output_batch().unwrap();
         assert_eq!(effects.script.borrow().emitted, expected[..split]);
-        assert!(!runtime.queue_frame(&frame(b"latest", 60, 16)).unwrap());
+        assert!(!runtime.queue_frame(&frame(b"latest", 60, 16)));
         effects
             .script
             .borrow_mut()
@@ -407,24 +403,24 @@ fn sustained_input_and_overlong_sequences_are_bounded_and_discarded() {
 fn untouched_frames_replace_but_partial_frames_finish_without_duplicate_bytes() {
     let effects = ScriptedEffects::default();
     let mut runtime = Runtime::new(effects.clone());
-    runtime.queue_frame(&frame(b"obsolete", 32, 2)).unwrap();
+    assert!(runtime.queue_frame(&frame(b"obsolete", 32, 2)));
     effects
         .script
         .borrow_mut()
         .writes
         .push_back(Err(io::ErrorKind::WouldBlock.into()));
     runtime.output_batch().unwrap();
-    assert!(runtime.queue_frame(&frame(b"current", 32, 2)).unwrap());
+    assert!(runtime.queue_frame(&frame(b"current", 32, 2)));
     effects.script.borrow_mut().writes.push_back(Ok(2));
     runtime.output_batch().unwrap();
-    assert!(!runtime.queue_frame(&frame(b"latest", 32, 2)).unwrap());
+    assert!(!runtime.queue_frame(&frame(b"latest", 32, 2)));
     effects
         .script
         .borrow_mut()
         .writes
         .push_back(Err(io::ErrorKind::Interrupted.into()));
     runtime.output_batch().unwrap();
-    assert!(!runtime.queue_frame(&frame(b"latest", 32, 2)).unwrap());
+    assert!(!runtime.queue_frame(&frame(b"latest", 32, 2)));
     effects.script.borrow_mut().writes.push_back(Ok(3));
     runtime.output_batch().unwrap();
     runtime.output_batch().unwrap();
@@ -433,7 +429,7 @@ fn untouched_frames_replace_but_partial_frames_finish_without_duplicate_bytes() 
         effects.script.borrow().emitted,
         b"\x1b[0m\x1b[H\x1b[2J\x1b[1;1H\x1b[0mTerminal too small (need 60x16)\x1b[0m\x1b[2;1H\x1b[0mInterface current (1/1)\x1b[0m\x1b[H"
     );
-    assert!(runtime.queue_frame(&frame(b"latest", 32, 2)).unwrap());
+    assert!(runtime.queue_frame(&frame(b"latest", 32, 2)));
     runtime.output_batch().unwrap();
     assert_eq!(
         effects.script.borrow().emitted,
@@ -445,7 +441,7 @@ fn untouched_frames_replace_but_partial_frames_finish_without_duplicate_bytes() 
 fn backpressure_keeps_clock_input_signals_resize_and_timer_effects_available() {
     let effects = ScriptedEffects::default();
     let mut runtime = Runtime::new(effects.clone());
-    runtime.queue_frame(&frame(b"eth0", 60, 16)).unwrap();
+    assert!(runtime.queue_frame(&frame(b"eth0", 60, 16)));
     for time in [0, 500_000_000, 1_000_000_000] {
         effects.clock.0.borrow_mut().time = time;
         effects
@@ -505,16 +501,14 @@ fn backpressure_keeps_clock_input_signals_resize_and_timer_effects_available() {
 fn output_batches_are_finite_for_screen_constructed_frames() {
     let effects = ScriptedEffects::default();
     let mut runtime = Runtime::new(effects.clone());
-    runtime.queue_frame(&frame(b"eth0", 0, 0)).unwrap();
+    assert!(runtime.queue_frame(&frame(b"eth0", 0, 0)));
     runtime.output_batch().unwrap();
     assert_eq!(
         effects.script.borrow().emitted,
         b"\x1b[0m\x1b[H\x1b[2J\x1b[H"
     );
     effects.script.borrow_mut().emitted.clear();
-    runtime
-        .queue_frame(&frame(&vec![b'x'; 20_000], 20_030, 2))
-        .unwrap();
+    assert!(runtime.queue_frame(&frame(&vec![b'x'; 20_000], 20_030, 2)));
     runtime.output_batch().unwrap();
     assert_eq!(effects.script.borrow().emitted.len(), 16 * 1024);
     assert!(runtime.has_pending_output());
@@ -558,7 +552,7 @@ fn input_eof_and_effect_faults_are_fatal_while_transient_io_yields() {
     for result in [Ok(0), Ok(usize::MAX), Err(io::ErrorKind::BrokenPipe.into())] {
         // Each fatal result has its own owner: a started frame cannot be replaced.
         let mut runtime = Runtime::new(effects.clone());
-        runtime.queue_frame(&frame(b"eth0", 1, 1)).unwrap();
+        assert!(runtime.queue_frame(&frame(b"eth0", 1, 1)));
         effects.script.borrow_mut().writes.push_back(result);
         assert!(runtime.output_batch().is_err());
     }

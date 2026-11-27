@@ -85,10 +85,7 @@ impl Clock for LinuxClock {
         cvt(unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, time.as_mut_ptr()) })?;
         let time = unsafe { time.assume_init() };
         let now = timespec_to_nanoseconds(time)?;
-        if self
-            .previous
-            .is_some_and(|previous| now.checked_sub(previous).is_none())
-        {
+        if self.previous.is_some_and(|previous| now < previous) {
             return Err(io::Error::other("BOOTTIME clock moved backwards"));
         }
         self.previous = Some(now);

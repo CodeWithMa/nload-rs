@@ -76,7 +76,6 @@ struct Stages {
     output_flags: bool,
     screen: bool,
     cursor: bool,
-    style: bool,
 }
 
 /// Own before initialization and retain until `guarded` has cleaned up. Attempts
@@ -125,9 +124,6 @@ impl<O: SessionOps> Session<O> {
         }
         let dimensions = self.ops.dimensions()?;
         self.stages.screen = true;
-        // Even a partial session command can leave an incomplete escape. From
-        // this point cleanup owns cancel/reset, including later runtime output.
-        self.stages.style = true;
         write_sequence(&mut self.ops, ENTER_SCREEN, None)?;
         self.stages.cursor = true;
         write_sequence(&mut self.ops, HIDE_CURSOR, None)?;
@@ -154,7 +150,8 @@ impl<O: SessionOps> Session<O> {
     /// consumed, even on failure; Drop is for paths missing explicit cleanup.
     pub(crate) fn cleanup(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
-        if std::mem::take(&mut self.stages.style) {
+        let screen_attempted = std::mem::take(&mut self.stages.screen);
+        if screen_attempted {
             restoration(&mut errors, "reset styling", || {
                 write_sequence(&mut self.ops, RESET_STYLE, Some(CLEANUP_WRITE_BUDGET))
             });
@@ -164,7 +161,7 @@ impl<O: SessionOps> Session<O> {
                 write_sequence(&mut self.ops, SHOW_CURSOR, Some(CLEANUP_WRITE_BUDGET))
             });
         }
-        if std::mem::take(&mut self.stages.screen) {
+        if screen_attempted {
             restoration(&mut errors, "leave alternate screen", || {
                 write_sequence(&mut self.ops, LEAVE_SCREEN, Some(CLEANUP_WRITE_BUDGET))
             });

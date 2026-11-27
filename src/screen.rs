@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Pure selected-monitor-view and dimensions to an opaque, cell-bounded frame.
+//! Render the selected interface as a cell-bounded terminal frame.
 //!
-//! Owns geometry, escaping, formatting, graph glyphs and small-terminal mode.
-//! Owns row encoding and default-style resets; terminal owns positioning, clearing
-//! and session commands. Adjacent observations share bottom-filled Braille cells;
-//! with color enabled, graph-row position selects a direction's xterm-256color foreground.
-//! Two samples per cell nominally span one second at the unchanged 500-ms cadence;
-//! delayed observations remain observation-spaced. Only the fitting suffix is read.
-//! Interactive output assumes UTF-8 and Braille font coverage; colors assume xterm-256color.
+//! Adjacent observations share Braille cells; colors assume xterm-256color.
+//! Rows encode their own styling; the terminal handles positioning and clearing.
 
 use crate::monitor::{DirectionView, SelectedView, ViewState};
 
@@ -100,12 +95,13 @@ pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize, color:
         height
     ];
     if width < MIN_WIDTH || height < MIN_HEIGHT {
+        let heading = header(view, width);
         for (row, text) in rows.iter_mut().zip([
-            "Terminal too small (need 60x16)".to_owned(),
-            header(view, width),
-            status(view.state).unwrap_or("Measured").to_owned(),
+            "Terminal too small (need 60x16)",
+            heading.as_str(),
+            status(view.state).unwrap_or("Measured"),
         ]) {
-            put(row, 0, &text);
+            put(row, 0, text);
         }
     } else {
         put(&mut rows[0], 0, &header(view, width));
@@ -185,8 +181,8 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: Op
         } else {
             [8, 6, 5, 4]
         };
-        for (index, row) in graph.iter_mut().enumerate() {
-            let count = dots.saturating_sub(4 * (height - 1 - index)).min(4);
+        for (index, row) in graph.iter_mut().rev().take(dots.div_ceil(4)).enumerate() {
+            let count = (dots - 4 * index).min(4);
             let cell = &mut row.cells[position / 2];
             let mut mask = if *cell == ' ' {
                 0
@@ -196,12 +192,7 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: Op
             for number in &numbers[..count] {
                 mask |= 1 << (number - 1);
             }
-            // U+2800 is deliberately never emitted: zero is ordinary space.
-            *cell = if mask == 0 {
-                ' '
-            } else {
-                char::from_u32(0x2800 + mask).unwrap()
-            };
+            *cell = char::from_u32(0x2800 + mask).unwrap();
         }
     }
 

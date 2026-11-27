@@ -233,9 +233,7 @@ fn drive<C: CounterSource, O: RuntimeEffects>(
         resized |= notifications.resized;
         if dirty {
             let frame = screen::render(monitor.selected_view(), dimensions.0, dimensions.1, color);
-            if runtime.queue_frame(&frame)? {
-                dirty = false;
-            }
+            dirty = !runtime.queue_frame(&frame);
         }
         if ready.output {
             runtime.output_batch()?;

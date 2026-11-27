@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! OS argument tokens to informational output or a validated run configuration.
-//!
-//! Owns argument grammar, graph ceilings/colors and Cargo-authoritative version output.
-//! Must not initialize clocks, discover interfaces or touch terminal state.
+//! Parse OS arguments and provide help and version text.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -43,7 +40,6 @@ pub(crate) enum Invocation {
     Run(RunConfig),
 }
 
-/// The application writes this diagnostic to stderr and returns status 2.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ArgumentError(&'static str);
 
@@ -56,7 +52,6 @@ impl fmt::Display for ArgumentError {
 impl std::error::Error for ArgumentError {}
 
 /// Parse `std::env::args_os().skip(1)` (the executable token is excluded).
-/// This pure operation never reads configuration, clocks, proc or terminals.
 pub(crate) fn parse(
     tokens: impl IntoIterator<Item = OsString>,
 ) -> Result<Invocation, ArgumentError> {
@@ -128,13 +123,14 @@ fn parse_ceiling(bytes: &[u8]) -> Result<u64, ArgumentError> {
     let value = bytes.iter().try_fold(0_u64, |value, digit| {
         value.checked_mul(10)?.checked_add(u64::from(digit - b'0'))
     });
-    match value {
-        Some(0) => Ok(DEFAULT_CEILING_BYTES),
-        Some(value) => value
-            .checked_mul(128)
-            .ok_or(ArgumentError("ceiling is outside the supported u64 range")),
-        None => Err(ArgumentError("ceiling is outside the supported u64 range")),
-    }
+    let bytes_per_second = value
+        .and_then(|value| value.checked_mul(128))
+        .ok_or(ArgumentError("ceiling is outside the supported u64 range"))?;
+    Ok(if bytes_per_second == 0 {
+        DEFAULT_CEILING_BYTES
+    } else {
+        bytes_per_second
+    })
 }
 
 pub(crate) fn version_text() -> String {

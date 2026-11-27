@@ -97,12 +97,10 @@ impl Monitor {
         }
     }
 
-    /// Accept one completion-timestamped round. Equal/earlier times are ignored
-    /// entirely (including failure/decrease outcomes); no lookup or state change.
+    /// Ignore rounds that don't advance the completion timestamp.
     /// Supply all names from a validated successful snapshot, or none on failure.
-    /// The lookup should use `proc_sampler::counter_outcome(&round, name)`.
     /// Additions preserve selected identity unless they fulfill a pending startup
-    /// request, which is consumed once and is not cancelled by navigation.
+    /// request.
     pub(crate) fn observe<'a>(
         &mut self,
         at: u64,
@@ -121,28 +119,24 @@ impl Monitor {
             }
         }
         for name in names {
-            let index = match self
+            let Err(index) = self
                 .entries
                 .binary_search_by(|entry| natural_order(&entry.name, name))
-            {
-                Ok(index) => index,
-                Err(index) => {
-                    self.entries.insert(
-                        index,
-                        Entry {
-                            name: name.to_vec(),
-                            state: EntryState::from_outcome(at, outcome(name)),
-                        },
-                    );
-                    if index <= self.selected {
-                        self.selected += 1;
-                    }
-                    index
-                }
+            else {
+                continue;
             };
+            self.entries.insert(
+                index,
+                Entry {
+                    name: name.to_vec(),
+                    state: EntryState::from_outcome(at, outcome(name)),
+                },
+            );
             if self.pending_request.as_deref() == Some(name) {
                 self.selected = index;
                 self.pending_request = None;
+            } else if index <= self.selected {
+                self.selected += 1;
             }
         }
         self.latest_at = at;

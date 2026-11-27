@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Whole-list acquisition of original-byte interface names and paired counters.
-//!
-//! Owns fresh `/proc/net/dev` reads through EOF and complete snapshot validation.
-//! Successful snapshots supply both discovery names and traffic observations.
+//! Read and validate complete `/proc/net/dev` snapshots, preserving raw names.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -84,7 +81,6 @@ impl CounterSource for ProcSampler {
 }
 
 impl ProcSampler {
-    // Private I/O seam for chunking/failure tests, shared by the real adapter.
     fn acquire_with<R: Read>(
         &mut self,
         open: impl FnOnce() -> io::Result<R>,
@@ -166,15 +162,11 @@ impl Snapshot {
         self.counters.get(name).copied()
     }
 
-    /// All original names, independent of activity and counter values.
     pub(crate) fn names(&self) -> impl Iterator<Item = &[u8]> {
         self.counters.keys().map(Vec::as_slice)
     }
 
-    /// Compute startup membership/selection without consuming the snapshot:
-    /// the same counters must supply the monitor's initial baselines.
-    /// An absent request selects the first entry and remains pending for runtime.
-    /// Call only after successful acquisition; acquisition errors remain distinct.
+    /// An absent request starts on the first entry and remains pending.
     pub(crate) fn startup(
         &self,
         requested: Option<&[u8]>,
@@ -200,12 +192,12 @@ fn words(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
 }
 
 fn header_matches(line: &[u8], expected: [&[u8]; 3]) -> bool {
-    let parts: Vec<_> = line.split(|byte| *byte == b'|').collect();
-    parts.len() == 3
-        && parts
-            .iter()
-            .zip(expected)
-            .all(|(part, expected)| words(part).eq(words(expected)))
+    let mut parts = line.split(|byte| *byte == b'|');
+    expected.into_iter().all(|expected| {
+        parts
+            .next()
+            .is_some_and(|part| words(part).eq(words(expected)))
+    }) && parts.next().is_none()
 }
 
 fn decimal_counter(field: &[u8]) -> Result<u64, SnapshotError> {

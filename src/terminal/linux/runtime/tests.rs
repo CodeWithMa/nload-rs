@@ -208,14 +208,12 @@ fn real_nonblocking_backpressure_does_not_hide_input_signal_or_timer_readiness()
             })
         },
     );
-    runtime
-        .queue_frame(&crate::screen::render(
-            monitor.selected_view(),
-            60,
-            16,
-            true,
-        ))
-        .unwrap();
+    assert!(runtime.queue_frame(&crate::screen::render(
+        monitor.selected_view(),
+        60,
+        16,
+        true,
+    )));
     runtime.output_batch().unwrap(); // Actual EAGAIN, no wait.
     let ready = runtime.wait(future).unwrap();
     assert_eq!(

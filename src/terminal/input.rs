@@ -22,13 +22,12 @@ enum State {
     },
 }
 
-/// No dynamic sequence buffer: only state, a capped length and validity bit.
+/// No dynamic sequence buffer: only state, a capped length and an idle deadline.
 /// Overlong sequences stay in discard mode until their terminator/idle timeout.
 #[derive(Default)]
 pub(super) struct Decoder {
     state: State,
     length: usize,
-    unmodified: bool,
     deadline: Option<u64>,
 }
 
@@ -60,15 +59,11 @@ impl Decoder {
                     0x1b => {
                         self.state = State::Escape;
                         self.length = 1;
-                        self.unmodified = true;
                     }
                     _ => {}
                 }
             } else {
                 self.length = self.length.saturating_add(1).min(SEQUENCE_LIMIT + 1);
-                if self.length > SEQUENCE_LIMIT {
-                    self.unmodified = false;
-                }
                 match self.state {
                     State::Escape => match byte {
                         b'[' | b'O' => self.state = State::Control,
@@ -84,7 +79,8 @@ impl Decoder {
                     },
                     State::Control => {
                         if (0x40..=0x7e).contains(&byte) {
-                            if self.unmodified && self.length == 3 {
+                            // Only bare CSI and SS3 arrows navigate.
+                            if self.length == 3 {
                                 match byte {
                                     b'A' | b'D' => events.push(Event::Backward),
                                     b'B' | b'C' => events.push(Event::Forward),
@@ -92,10 +88,6 @@ impl Decoder {
                                 }
                             }
                             self.reset();
-                        } else {
-                            // Both CSI and SS3 accept parameters/intermediates
-                            // for consumption, but only the bare forms navigate.
-                            self.unmodified = false;
                         }
                     }
                     State::Other => {

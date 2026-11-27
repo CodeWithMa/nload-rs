@@ -19,13 +19,7 @@ sha256sum -c nload-rs-linux-x86_64.tar.gz.sha256 &&
   tar -xzf nload-rs-linux-x86_64.tar.gz
 ```
 
-Once the archive is verified and extracted:
-
-```sh
-./nload-rs --color
-```
-
-To run it from anywhere, put `nload-rs` in a directory on your `PATH`.
+Run `./nload-rs` from the extraction directory, or move it onto your `PATH`.
 
 ## Quick start
 
@@ -36,8 +30,6 @@ interface:
 ```sh
 nload-rs --color lo
 ```
-
-Use `./nload-rs` instead if you just extracted the binary.
 
 Replace `lo` with the interface you want to watch. If it isn’t present at
 startup, nload-rs starts on the first available interface and switches to the
@@ -58,7 +50,6 @@ From this checkout, with stable Rust that supports edition 2024:
 
 ```sh
 cargo install --path . --locked
-nload-rs --color
 ```
 
 ### Arch Linux package

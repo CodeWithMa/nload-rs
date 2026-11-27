@@ -47,11 +47,12 @@ jobs:
           NLOAD_RS_PTY_BINARY="$binary" cargo +stable test --release --locked --test linux_pty
       - name: Package the binary
         run: |
+          archive=nload-rs-linux-x86_64.tar.gz
           staging="$(mktemp -d)"
           install -m 755 target/release/nload-rs "$staging/"
           install -m 644 LICENSE THIRD-PARTY-NOTICES.md "$staging/"
-          tar -czf nload-rs-linux-x86_64.tar.gz -C "$staging" nload-rs LICENSE THIRD-PARTY-NOTICES.md
-          sha256sum nload-rs-linux-x86_64.tar.gz > nload-rs-linux-x86_64.tar.gz.sha256
+          tar -czf "$archive" -C "$staging" nload-rs LICENSE THIRD-PARTY-NOTICES.md
+          sha256sum "$archive" > "$archive.sha256"
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

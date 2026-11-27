@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Render the selected interface as a cell-bounded terminal frame.
-//!
-//! Adjacent observations share Braille cells; colors assume xterm-256color.
-//! Rows encode their own styling; the terminal handles positioning and clearing.
-
 use crate::monitor::{DirectionView, SelectedView, ViewState};
 
 const MIN_WIDTH: usize = 60;
@@ -16,8 +11,6 @@ const TOTAL_UNITS: [&str; 4] = ["Byte", "kByte", "MByte", "GByte"];
 const INCOMING_PALETTE: [u8; 6] = [60, 61, 98, 140, 146, 183];
 const OUTGOING_PALETTE: [u8; 6] = [96, 132, 133, 170, 176, 219];
 
-/// Only screen construction can establish the logical cell bounds and row protocol.
-/// Encoded rows omit trailing blank cells but retain start/end and statistics resets.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Frame {
     width: usize,
@@ -82,9 +75,6 @@ impl Row {
     }
 }
 
-/// Exactly `height` logical rows of `width` terminal cells, including zero sizes.
-/// Views come from Monitor (positive ceilings, finite nonnegative rates and paired
-/// availability invariants). Dimensions affect presentation only, never history.
 pub(crate) fn render(view: SelectedView<'_>, width: usize, height: usize, color: bool) -> Frame {
     let mut rows = vec![
         Row {
@@ -142,7 +132,6 @@ fn status(state: ViewState) -> Option<&'static str> {
 }
 
 fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: Option<&[u8; 6]>) {
-    // Ceilings are exact integer bytes/s, so use widened integer bit conversion.
     put(
         &mut rows[0],
         0,
@@ -158,7 +147,6 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: Op
         row.statistics = Some(graph_width + GAP);
         row.graph_foreground = palette.map(|palette| {
             let k = height - 1 - index;
-            // Integer nearest-grade selection, including exact halfway-up ties.
             let grade = (10 * k + height - 1) / (2 * (height - 1));
             palette[grade]
         });
@@ -222,7 +210,6 @@ fn direction(rows: &mut [Row], label: &str, view: DirectionView<'_>, palette: Op
     }
 }
 
-/// Copy already-safe ASCII, clipping only presentation strings, never numbers.
 fn put(row: &mut Row, column: usize, text: &str) {
     for (cell, character) in row.cells.iter_mut().skip(column).zip(text.chars()) {
         assert!(
@@ -245,8 +232,6 @@ fn header(view: SelectedView<'_>, width: usize) -> String {
     } else if width >= position.len() {
         position
     } else {
-        // Extremely narrow rows cannot hold the position. Keep selection bytes
-        // visible where possible; escape chunks are never split by shortening.
         escaped_name(view.name, width)
     }
 }
@@ -290,9 +275,6 @@ fn prefix(value: f64) -> (usize, f64) {
 fn format_rate(bytes_per_second: f64) -> String {
     let bits = bytes_per_second * 8.0;
     let (index, factor) = prefix(bits);
-    // Explicit positive halfway-up rounding, independent of the formatter's tie
-    // rule. Monitor-derived rates (at most a u64 delta per nanosecond) fit u128
-    // cents even at the capped G prefix. No integer bytes/s truncation occurs.
     let cents = (bits / factor * 100.0 + 0.5).floor() as u128;
     decimal(cents, RATE_UNITS[index])
 }
@@ -304,8 +286,6 @@ fn format_integer(value: u128, units: &[&str; 4]) -> String {
         index += 1;
         factor *= 1024;
     }
-    // Exact u64 totals and u64 ceilings * 8, including their hundredths and
-    // rounding increments, remain safely within the widened integer domain.
     let cents = (value * 100 + factor / 2) / factor;
     decimal(cents, units[index])
 }
@@ -439,8 +419,6 @@ mod tests {
         }
     }
 
-    // Test-side whitelist at the frame seam, independent of production encoding.
-    // Only nonblank Braille may be colored; all text/space cells must be default.
     fn decoded(frame: &Frame) -> Vec<Vec<(char, Option<u8>)>> {
         let (width, height) = frame.dimensions();
         assert_eq!(frame.encoded_rows().len(), height);
@@ -593,9 +571,6 @@ mod tests {
 
     #[test]
     fn adjacent_rates_at_half_steps_do_not_gain_a_dot_from_additive_rounding() {
-        // Literal full columns from the Unicode dot diagram. At H=10 the
-        // default ceiling's first threshold is exactly 16384 bytes/s. The H=6
-        // power-of-two ceiling keeps normalization exact before scaling.
         for (width, height, ceiling, halfway, below, at) in [
             (80, 24, 1_310_720, 16_384.0_f64, "          ", "         ⢀"),
             (80, 24, 1_310_720, 49_152.0, "         ⢀", "         ⢠"),
@@ -665,8 +640,6 @@ mod tests {
 
     #[test]
     fn nearest_dot_half_steps_are_exact_bottom_up_without_minimum_or_tolerance() {
-        // H=6, c=24 makes one byte/s one dot. Literal Unicode masks are
-        // worked from the standard dot diagram, not the production algorithm.
         let right = [' ', '⢀', '⢠', '⢰', '⢸'];
         for boundary in 0_usize..24 {
             let halfway = boundary as f64 + 0.5;
@@ -783,8 +756,6 @@ mod tests {
                     .collect();
                 assert_eq!(actual, expected);
             }
-            // With c=8H, rate 1 is the first half-dot boundary in each graph.
-            // Test true normalization at distinct positive ceilings, not c=4H.
             for (rate, expected) in [(1.0 - 1e-12, ' '), (1.0, '⢀'), (1.0 + 1e-12, '⢀')] {
                 let history = samples(&[rate]);
                 let mut selected = view(&history);
@@ -816,7 +787,6 @@ mod tests {
                 vec![183, 146, 146, 140, 140, 98, 98, 61, 61, 60],
                 vec![219, 176, 176, 170, 170, 133, 133, 132, 132, 96],
             ),
-            // H=11 has exact half-grade ties; ties rise rather than to even.
             (
                 25,
                 vec![183, 146, 146, 140, 140, 98, 98, 61, 61, 60],
@@ -835,7 +805,6 @@ mod tests {
                     }
                 }
             }
-            // Explicit reset at the gap and again at the statistics boundary.
             assert!(frame.encoded_rows()[outgoing_label - 5].contains("\x1b[0m  \x1b[0mCurr:"));
             for row in [0, 1, 2, outgoing_label] {
                 assert!(!frame.encoded_rows()[row].contains("38;5;"));
@@ -1219,8 +1188,6 @@ mod tests {
             } else {
                 200
             };
-            // Two-second observations give a full or genuinely zero current-rate
-            // half-cell, without fabricating catch-up samples for delayed rounds.
             monitor.observe(index * 2_000_000_000, [], |_| {
                 CounterOutcome::Readable(Counters {
                     incoming: total,
@@ -1235,8 +1202,6 @@ mod tests {
             format!("{}{}⣿", " ".repeat(35), "⡇".repeat(34))
         );
         let narrow = render(monitor.selected_view(), 60, 16);
-        // The distinct last pair detects an oldest-prefix or reversed-history
-        // renderer, which a purely periodic alternating fixture would miss.
         assert_eq!(cells(&narrow[8], 0, 30), format!("{}⣿", "⡇".repeat(29)));
         let small = render(monitor.selected_view(), 59, 15);
         assert!(small[0].starts_with("Terminal too small"));

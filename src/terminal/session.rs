@@ -48,8 +48,6 @@ pub(crate) struct Saved<T> {
     pub(super) output_flags: i32,
 }
 
-/// Private effect seam: the Linux adapter and the failure-script adapter both
-/// exercise the same staged owner. Callers do not coordinate these operations.
 pub(crate) trait SessionOps {
     type Termios;
 
@@ -63,7 +61,6 @@ pub(crate) trait SessionOps {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize>;
     fn wait_writable(&mut self, timeout: Duration) -> io::Result<()>;
     fn dimensions(&mut self) -> io::Result<(usize, usize)>;
-    /// Drain wake tokens before inspecting flags; bytes have no signal identity.
     fn notifications(&mut self) -> io::Result<Notifications>;
     fn release_notifications(&mut self);
 }
@@ -78,8 +75,6 @@ struct Stages {
     cursor: bool,
 }
 
-/// Own before initialization and retain until `guarded` has cleaned up. Attempts
-/// are recorded *before* each effect: even a failed/partial effect may need undo.
 pub(crate) struct Session<O: SessionOps> {
     ops: O,
     saved: Option<Saved<O::Termios>>,
@@ -97,8 +92,6 @@ impl<O: SessionOps> Session<O> {
         }
     }
 
-    /// Validate, save, prepare notification, then mutate. Small/zero dimensions
-    /// are returned normally. A session is single-use, including failed setup.
     pub(crate) fn initialize(&mut self) -> io::Result<(usize, usize)> {
         if self.initialized {
             return Err(io::Error::other("terminal session already initialized"));
@@ -109,7 +102,6 @@ impl<O: SessionOps> Session<O> {
         self.stages.notifications = true;
         self.ops.prepare_notifications()?;
 
-        // All saved state and notification ownership exist before mutation.
         let saved = self.saved.as_ref().expect("snapshot saved before mutation");
         self.stages.raw = true;
         self.ops.raw(&saved.termios)?;
@@ -140,14 +132,10 @@ impl<O: SessionOps> Session<O> {
         self.ops.notifications()
     }
 
-    // Runtime extensions stay inside terminal; application callers do not get
-    // FDs or manage staged state themselves.
     pub(super) fn effects_mut(&mut self) -> &mut O {
         &mut self.ops
     }
 
-    /// Exhaustive, nonpanicking and idempotent. Each attempted restoration is
-    /// consumed, even on failure; Drop is for paths missing explicit cleanup.
     pub(crate) fn cleanup(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
         let screen_attempted = std::mem::take(&mut self.stages.screen);
@@ -166,8 +154,6 @@ impl<O: SessionOps> Session<O> {
                 write_sequence(&mut self.ops, LEAVE_SCREEN, Some(CLEANUP_WRITE_BUDGET))
             });
         }
-        // Keep output nonblocking while attempting screen restoration. Neither
-        // tcdrain nor switching to blocking writes can stall shutdown forever.
         if let Some(saved) = &self.saved {
             if std::mem::take(&mut self.stages.raw) {
                 restoration(&mut errors, "restore termios", || {
@@ -253,8 +239,6 @@ fn write_sequence<O: SessionOps>(
 }
 
 fn restoration(errors: &mut Vec<String>, operation: &str, effect: impl FnOnce() -> io::Result<()>) {
-    // A scripted adapter can panic too; one failed operation must never prevent
-    // later attempts or cause a double panic from Drop during unwinding.
     match catch_unwind(AssertUnwindSafe(|| {
         effect().map_err(|error| error.to_string())
     })) {
@@ -270,12 +254,9 @@ fn restoration(errors: &mut Vec<String>, operation: &str, effect: impl FnOnce() 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ExitReport {
     pub(crate) status: u8,
-    /// Returned only after restoration and hook restoration; the application
-    /// reports these on stderr and returns ExitCode normally.
     pub(crate) diagnostics: Vec<String>,
 }
 
-/// Startup and runtime failures inside the caught-panic boundary use status 1.
 #[derive(Debug)]
 pub(crate) struct Failure {
     diagnostic: String,
@@ -293,9 +274,6 @@ impl From<io::Error> for Failure {
     }
 }
 
-/// Wrap *all* fallible startup and execution in this closure. Construct the
-/// uninitialized owner first, initialize it only after discovery/selection.
-/// Process-global hook: use once from the single-threaded application entry.
 pub(crate) fn guarded<O: SessionOps>(
     session: &mut Session<O>,
     execute: impl FnOnce(&mut Session<O>) -> Result<Shutdown, Failure>,

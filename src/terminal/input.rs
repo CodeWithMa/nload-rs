@@ -22,8 +22,6 @@ enum State {
     },
 }
 
-/// No dynamic sequence buffer: only state, a capped length and an idle deadline.
-/// Overlong sequences stay in discard mode until their terminator/idle timeout.
 #[derive(Default)]
 pub(super) struct Decoder {
     state: State,
@@ -46,8 +44,6 @@ impl Decoder {
         self.expire(now);
         let mut events = Vec::new();
         for &byte in bytes {
-            // Raw-mode Ctrl+C is an explicit shutdown control even while an
-            // incomplete escape sequence is pending; it never waits for timeout.
             if byte == 3 {
                 self.reset();
                 events.push(Event::Shutdown(Shutdown::Interrupt));
@@ -74,12 +70,10 @@ impl Decoder {
                             };
                         }
                         0x20..=0x2f => self.state = State::Other,
-                        // ESC + a final (including command-looking q/Q) is consumed.
                         _ => self.reset(),
                     },
                     State::Control => {
                         if (0x40..=0x7e).contains(&byte) {
-                            // Only bare CSI and SS3 arrows navigate.
                             if self.length == 3 {
                                 match byte {
                                     b'A' | b'D' => events.push(Event::Backward),

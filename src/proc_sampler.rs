@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Read and validate complete `/proc/net/dev` snapshots, preserving raw names.
-
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -21,7 +19,6 @@ pub(crate) enum CounterOutcome {
     ReadFailed,
 }
 
-/// A validated complete snapshot. No partially parsed rows can escape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Snapshot {
     counters: BTreeMap<Vec<u8>, Counters>,
@@ -62,13 +59,10 @@ impl std::error::Error for AcquisitionError {
     }
 }
 
-/// The application owns the completion timestamp after this operation returns.
-/// On Err, the *entire round* failed, never an empty/partially salvaged snapshot.
 pub(crate) trait CounterSource {
     fn acquire(&mut self) -> Result<Snapshot, AcquisitionError>;
 }
 
-/// Production counter adapter: one fresh open and bulk traversal per round.
 #[derive(Default)]
 pub(crate) struct ProcSampler {
     buffer: Vec<u8>,
@@ -95,9 +89,6 @@ impl ProcSampler {
 }
 
 impl Snapshot {
-    /// Validate the two kernel headers, newline-complete rows, exact names and
-    /// all 16 unsigned fields. Padding alone is removed; names need not be UTF-8.
-    /// Empty discovery (headers only) is valid; duplicates/partial rows are not.
     pub(crate) fn parse(bytes: &[u8]) -> Result<Self, SnapshotError> {
         if !bytes.ends_with(b"\n") {
             return Err(SnapshotError("missing final newline (incomplete snapshot)"));
@@ -166,8 +157,6 @@ impl Snapshot {
         self.counters.keys().map(Vec::as_slice)
     }
 
-    /// Start on the first entry if no interface was requested or the requested
-    /// interface is missing. Only a missing requested interface remains pending.
     pub(crate) fn startup(
         &self,
         requested: Option<&[u8]>,
@@ -215,17 +204,13 @@ fn decimal_counter(field: &[u8]) -> Result<u64, SnapshotError> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StartupSelection {
-    /// Naturally sorted initial membership; retain entries for the whole session.
     pub(crate) names: Vec<Vec<u8>>,
-    /// Zero-based initial selection, always within the nonempty names list.
     pub(crate) selected: usize,
-    /// Exact absent startup request, consumed permanently on first observation.
     pub(crate) pending_request: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StartupError {
-    /// Application diagnostic/status 1, distinct from acquisition failure.
     EmptyDiscovery,
 }
 
@@ -239,7 +224,6 @@ impl fmt::Display for StartupError {
 
 impl std::error::Error for StartupError {}
 
-/// Translate one global round for a retained or newly discovered name.
 pub(crate) fn counter_outcome(
     round: &Result<Snapshot, AcquisitionError>,
     name: &[u8],
@@ -283,8 +267,6 @@ fn significant_digits(digits: &[u8]) -> &[u8] {
     &digits[zeros..]
 }
 
-/// Scripted counter adapter for deterministic application-loop tests. Exhaustion
-/// is a test failure, not an invented runtime outcome; no clock/terminal effects.
 #[cfg(test)]
 pub(crate) struct ScriptedCounters {
     rounds: std::collections::VecDeque<Result<Snapshot, AcquisitionError>>,
@@ -437,7 +419,7 @@ mod tests {
                         outgoing: 9
                     })
                 );
-                assert_eq!(snapshot.get(b"eth0"), None); // no previous buffer/EOF reuse
+                assert_eq!(snapshot.get(b"eth0"), None);
             }
         }
         assert_eq!(opens, 2);
@@ -452,7 +434,7 @@ mod tests {
             b": 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
             b"bad name: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
             b"bad\0name: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
-            b"eth0: 1 2 3 4 5 6 7 8 9\n", // paired fields alone are insufficient
+            b"eth0: 1 2 3 4 5 6 7 8 9\n",
             b"eth0: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
             b"eth0: -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
             b"eth0: 0 0 0 0 0 0 0 0 +1 0 0 0 0 0 0 0\n",
@@ -576,7 +558,7 @@ mod tests {
             let selection = snapshot.startup(Some(name)).unwrap();
             assert_eq!(selection.names, expected);
             assert_eq!(selection.selected, index);
-            assert!(snapshot.get(name).is_some()); // initial baselines remain available
+            assert!(snapshot.get(name).is_some());
         }
         for missing in [b"ETH2".as_slice(), b"wg0", b"missing", b"e\\xFF1", b""] {
             let fallback = snapshot.startup(Some(missing)).unwrap();
@@ -633,8 +615,6 @@ mod tests {
                 large
             ]
         );
-        // Later natural differences take precedence over earlier zero padding,
-        // before the complete-byte tie-break is applied.
     }
 
     #[test]
@@ -718,6 +698,5 @@ mod tests {
         assert_eq!(membership.names, [raw.to_vec(), b"B".to_vec()]);
         assert_eq!(membership.selected, 0);
         assert_eq!(source.calls, 3);
-        // Monitor tests, rather than acquisition, establish the new-run reset.
     }
 }

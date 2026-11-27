@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Shared scripted adapters for runtime and later application integration tests.
-//! Handles observe effect requests and emitted bytes without accessing Runtime's
-//! decoder or frame bookkeeping. No real-time sleeps or numerical clock oracle.
-
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io;

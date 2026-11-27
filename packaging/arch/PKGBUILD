@@ -1,9 +1,6 @@
-# Build the surrounding checkout, including local edits, rather than downloading
-# a release. Keep this file in packaging/arch/ inside the repository.
 _checkout=$(realpath -- "$(dirname -- "${BASH_SOURCE[0]}")/../..")
 
 pkgname=nload-rs
-# Cargo.toml remains the sole package-version authority.
 pkgver=$(awk '
     /^\[package\]$/ { in_package = 1; next }
     /^\[/ { in_package = 0 }
@@ -19,7 +16,6 @@ source=()
 sha256sums=()
 
 prepare() {
-    # Replace the staged tree so deleted checkout files cannot survive a rebuild.
     rm -rf -- "$srcdir/$pkgname"
     mkdir -p -- "$srcdir/$pkgname"
     cp -a -- "$_checkout/"{Cargo.toml,Cargo.lock,src,tests,LICENSE,README.md,THIRD-PARTY-NOTICES.md} \
@@ -41,7 +37,6 @@ check() {
     cd "$srcdir/$pkgname"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
-    # Run PTY product checks against the executable that will be packaged.
     NLOAD_RS_PTY_BINARY="$srcdir/$pkgname/target/release/$pkgname" cargo test --frozen
 }
 

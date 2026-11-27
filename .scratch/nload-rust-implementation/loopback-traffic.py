@@ -31,7 +31,6 @@ def main():
     payload = b"n" * 8192
     datagrams = 0
     started = time.monotonic()
-    # Receive each datagram immediately, avoiding an unbounded queue or a thread.
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
         receiver.bind(("127.0.0.1", 0))
         receiver.settimeout(2.0)

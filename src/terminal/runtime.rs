@@ -10,7 +10,6 @@ use super::{Notifications, Shutdown};
 const INPUT_BATCH: usize = 256;
 const OUTPUT_BATCH: usize = 16 * 1024;
 
-/// Integer CLOCK_BOOTTIME nanoseconds; errors are fatal, never counter failures.
 pub(crate) trait Clock {
     fn now(&mut self) -> io::Result<u64>;
 }
@@ -30,8 +29,6 @@ pub(crate) struct Ready {
     pub(crate) output: bool,
 }
 
-/// Real effects vary here: LinuxRuntime borrows owned session/clock effects;
-/// ScriptedEffects supplies deterministic clock, readiness, input and output.
 pub(crate) trait RuntimeEffects: Clock {
     fn wait(
         &mut self,
@@ -50,7 +47,6 @@ struct PendingOutput {
     emitted: usize,
 }
 
-/// Decoder/output state only; never acquires counters or coordinates redraws.
 pub(crate) struct Runtime<O> {
     effects: O,
     decoder: Decoder,
@@ -76,8 +72,6 @@ impl<O: RuntimeEffects> Runtime<O> {
         self.effects.dimensions()
     }
 
-    /// Arms an absolute one-shot BOOTTIME sample deadline; decoder timeout is a
-    /// poll timeout. EINTR is a spurious wake, so callers recheck shutdown/time.
     pub(crate) fn wait(&mut self, sample_deadline: u64) -> io::Result<Ready> {
         let now = self.now()?;
         let idle = self
@@ -88,8 +82,6 @@ impl<O: RuntimeEffects> Runtime<O> {
             .wait(sample_deadline, idle, self.has_pending_output())
     }
 
-    /// One read of at most 256 bytes; EINTR/EAGAIN yield to the loop. Expiration
-    /// also runs without readable input and never requests a counter acquisition.
     pub(crate) fn input_batch(&mut self, readable: bool) -> io::Result<Vec<Event>> {
         let now = self.now()?;
         self.decoder.expire(now);
@@ -116,7 +108,6 @@ impl<O: RuntimeEffects> Runtime<O> {
         }
     }
 
-    /// Replace an untouched frame. Return false if a partial frame must finish first.
     #[must_use = "retry the redraw if a partial frame is still being written"]
     pub(crate) fn queue_frame(&mut self, frame: &Frame) -> bool {
         if self.frame.as_ref().is_some_and(|frame| frame.emitted != 0) {
@@ -141,7 +132,6 @@ impl<O: RuntimeEffects> Runtime<O> {
         self.frame.is_some()
     }
 
-    /// One nonblocking syscall of at most 16 KiB, never a writability wait.
     pub(crate) fn output_batch(&mut self) -> io::Result<()> {
         let Some(frame) = self.frame.as_mut() else {
             return Ok(());

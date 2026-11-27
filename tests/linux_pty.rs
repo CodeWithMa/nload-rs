@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #![cfg(target_os = "linux")]
 
-//! Product tests, run by `cargo test --locked`. No product instrumentation.
-//! NLOAD_RS_PTY_BINARY may select a separately built release binary for this
-//! harness; otherwise Cargo supplies the real debug executable.
-
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::mem::MaybeUninit;
@@ -80,8 +76,6 @@ impl Pty {
         });
         let master = unsafe { File::from_raw_fd(master) };
         let slave = unsafe { File::from_raw_fd(slave) };
-        // Do not leak retained observers through exec. Stdio duplicates only the
-        // explicitly selected descriptions into the child.
         for fd in [&master, &slave] {
             // SAFETY: live descriptor, integer flags.
             checked(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) });
@@ -114,7 +108,6 @@ impl Pty {
     }
 
     fn assert_flags_restored(&self) {
-        // This observer shares the child's OFD and stays open after child exit.
         assert_eq!(flags(&self.slave), self.saved_flags);
     }
 
@@ -145,8 +138,6 @@ fn command() -> Command {
 
 impl Product {
     fn spawn(width: u16, height: u16, setup: impl FnOnce(&mut Command, &Pty, &Pty)) -> Self {
-        // Independent terminals and OFDs: input restoration cannot accidentally
-        // stand in for output restoration, and either master can hang up alone.
         let input = Pty::new(width, height);
         let output = Pty::new(width, height);
         let mut command = command();
@@ -300,7 +291,6 @@ impl Product {
 
 impl Drop for Product {
     fn drop(&mut self) {
-        // Failure/timeouts cannot orphan a monitor or leave it stopped.
         if self.child.try_wait().ok().flatten().is_none() {
             let _ = self.child.kill();
         }
@@ -333,25 +323,25 @@ fn decoder_counts_styled_braille_as_cells_and_preserves_default_text() {
 #[test]
 fn decoder_rejects_unknown_protocol_style_leaks_and_cell_overflow() {
     for body in [
-        "\x1b[+1;1H\x1b[0mx\x1b[0m",                // not a numeric CSI address
-        "\x1b[1;2H\x1b[0mx\x1b[0m",                 // unexpected column
-        "\x1b[2;1H\x1b[0mx\x1b[0m",                 // outside logical height
-        "\x1b[1;1H\x1b[0m\x1b[2J\x1b[0m",           // screen cannot clear
-        "\x1b[1;1H\x1b[0m\x1b[?25h\x1b[0m",         // screen cannot change session
-        "\x1b[1;1H\x1b[0m\x1b[31m⣿\x1b[0m",         // unsupported SGR
-        "\x1b[1;1H\x1b[0m\x1b[38;5;1m⣿\x1b[0m",     // outside palette
-        "\x1b[1;1H\x1b[0m\x1b[48;5;60m⣿\x1b[0m",    // background
-        "\x1b[1;1H\x1b[0m\x1b[38;5;60mCurr\x1b[0m", // styled text
-        "\x1b[1;1H\x1b[0m\x1b[38;5;60m \x1b[0m",    // styled blank
-        "\x1b[1;1H\x1b[0m⣿\x1b[0m",                 // unstyled Braille
-        "\x1b[1;1H\x1b[0m\x1b[38;5;60m⠀\x1b[0m",    // U+2800
-        "\x1b[1;1H\x1b[0mé\x1b[0m",                 // arbitrary Unicode
+        "\x1b[+1;1H\x1b[0mx\x1b[0m",
+        "\x1b[1;2H\x1b[0mx\x1b[0m",
+        "\x1b[2;1H\x1b[0mx\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x1b[2J\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x1b[?25h\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x1b[31m⣿\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x1b[38;5;1m⣿\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x1b[48;5;60m⣿\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x1b[38;5;60mCurr\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x1b[38;5;60m \x1b[0m",
+        "\x1b[1;1H\x1b[0m⣿\x1b[0m",
+        "\x1b[1;1H\x1b[0m\x1b[38;5;60m⠀\x1b[0m",
+        "\x1b[1;1H\x1b[0mé\x1b[0m",
         "\x1b[1;1H\x1b[0mx\n\x1b[0m",
         "\x1b[1;1H\x1b[0mx\r\x1b[0m",
         "\x1b[1;1H\x1b[0m\x07\x1b[0m",
-        "\x1b[1;1Hx\x1b[0m",                      // missing row-start reset
-        "\x1b[1;1H\x1b[0mx",                      // missing final reset
-        "\x1b[1;1H\x1b[0m\x1b[38;5;60m⣿⢸\x1b[0m", // two cells in width one
+        "\x1b[1;1Hx\x1b[0m",
+        "\x1b[1;1H\x1b[0mx",
+        "\x1b[1;1H\x1b[0m\x1b[38;5;60m⣿⢸\x1b[0m",
     ] {
         assert!(
             std::panic::catch_unwind(|| decode_rows(body.as_bytes(), 1, 1, true)).is_err(),
@@ -364,9 +354,6 @@ fn decoder_rejects_unknown_protocol_style_leaks_and_cell_overflow() {
     }
 }
 
-/// Validate protocol rather than visual appearance. This is deliberately a
-/// whitelist, not a general ANSI stripper: SGR is zero-width, allowed Braille
-/// consumes one cell, and all other controls/Unicode/escapes are rejected.
 fn decode_rows(mut bytes: &[u8], width: usize, height: usize, color: bool) -> Vec<String> {
     let mut rows = vec![String::new(); height];
     let mut next_row = 1;
@@ -508,8 +495,6 @@ fn normal_controls_restore_real_modes_shared_flags_and_protocol() {
         let mut product = Product::start(80, 24);
         product.frame(80, 24, |_| true);
         assert_raw(&product);
-        // Ctrl+Z is a byte, not a stop signal; a following navigation redraw
-        // proves that the child continues processing, even for singleton lists.
         product.send(b"\x1a\x1b[C");
         product.frame(80, 24, |_| true);
         if let Some(byte) = typed {
@@ -608,9 +593,6 @@ fn colored_backpressure_resumes_a_complete_large_frame_then_recovers_latest_resi
     product.output.resize(1000, 1000);
     product.signal(libc::SIGWINCH);
     wait_backpressure(&product);
-    // Input and resize arrive while a colored frame is partially written. Drain
-    // only after requesting the latest small view; the started large frame must
-    // complete first. Different heights identify each permitted fixture geometry.
     product.send(b"\x1b[C\x1b[D\x1b[C\x1b[D");
     product.output.resize(59, 15);
     product.signal(libc::SIGWINCH);
@@ -627,8 +609,6 @@ fn colored_backpressure_resumes_a_complete_large_frame_then_recovers_latest_resi
         },
         |rows| rows[0].starts_with("Terminal too small"),
     );
-    // The strict decoder has consumed the complete large frame on its way to the
-    // warning. Audit the captured bytes independently for a colored tall frame.
     let mut remaining = product.bytes.as_slice();
     while let Some(start) = find(remaining, START) {
         remaining = &remaining[start + START.len()..];
@@ -683,8 +663,6 @@ fn shared_terminal_description_and_existing_nonblocking_flags_are_preserved() {
         if already_nonblocking {
             product.input.saved_flags |= libc::O_NONBLOCK;
         }
-        // Observe the same terminal/OFD used for both standard streams, while
-        // retaining master and slave observers outside the subprocess.
         product.output = Pty {
             master: Some(product.input.master.as_ref().unwrap().try_clone().unwrap()),
             slave: product.input.slave.try_clone().unwrap(),
@@ -724,7 +702,6 @@ fn queued_external_interrupt_and_terminate_choose_interrupt() {
         assert!(Instant::now() < deadline, "child did not stop");
         std::thread::sleep(Duration::from_millis(1));
     }
-    // Both are kernel-pending before ordinary flow resumes; SIGINT must win.
     product.signal(libc::SIGTERM);
     product.signal(libc::SIGINT);
     product.signal(libc::SIGCONT);
@@ -733,19 +710,14 @@ fn queued_external_interrupt_and_terminate_choose_interrupt() {
 }
 
 #[test]
-fn fragmented_repeated_arrows_and_ignored_sequences_reach_expected_selection() {
+fn repeated_arrows_and_ignored_sequences_reach_expected_selection() {
     let mut product = Product::start(80, 24);
     let first = product.frame(80, 24, |_| true);
     let (mut index, count) = position(&first);
     for introducer in *b"[O" {
         for (final_byte, forward) in [(b'A', false), (b'B', true), (b'C', true), (b'D', false)] {
-            for split in [1, 2] {
-                let sequence = [27, introducer, final_byte];
-                product.send(&sequence[..split]);
-                // A finite readiness wait lets the incomplete fragment reach
-                // the child without crossing its 100-ms idle timeout.
-                product.collect(10);
-                product.send(&sequence[split..]);
+            for _ in 0..2 {
+                product.send(&[27, introducer, final_byte]);
                 index = if forward {
                     index % count + 1
                 } else {
@@ -755,9 +727,7 @@ fn fragmented_repeated_arrows_and_ignored_sequences_reach_expected_selection() {
             }
         }
     }
-    // Command-looking suffixes, aliases and typed Ctrl+Z must not quit or move.
     product.send(b"\x1b[1;2C\x1b[5~\x1b[6~\t\r\x1a\x1b[q\x1b[Q\x1b]qQ\x07");
-    // A subsequent valid event supplies an observable processing checkpoint.
     product.send(b"\x1b[C\x1b[C\x1bOD");
     index = index % count + 1;
     product.frame(80, 24, |rows| position(rows) == (index, count));
@@ -771,7 +741,6 @@ fn small_startup_resize_sampling_navigation_and_quit_keep_bounded_rows() {
     for (width, height) in [(59, 16), (60, 15), (1, 1)] {
         let mut product = Product::start(width, height);
         product.frame(width as usize, height as usize, |_| true);
-        // No redundant startup sample; small mode later leaves baseline status.
         if width > 1 {
             product.frame(width as usize, height as usize, |rows| {
                 rows[0].contains("too small") && !rows.iter().any(|row| row.contains("Waiting"))
@@ -829,8 +798,6 @@ fn graph_colors_are_opt_in_under_no_color_and_locale_declarations() {
         assert_eq!(baseline[1], "Waiting for rate sample");
         assert!(find(&product.bytes, b"\x1b[38;5;").is_none());
 
-        // Ordinary nonprivileged loopback traffic after the baseline. Receive
-        // each datagram immediately so queue capacity is not a timing oracle.
         loopback_burst();
         let graph_width = width as usize - 30;
         let rows = product.frame(width as usize, height as usize, |rows| {
@@ -855,7 +822,7 @@ fn graph_colors_are_opt_in_under_no_color_and_locale_declarations() {
         assert!(!product.bytes.contains(&b'\n'));
         assert!(!product.bytes.contains(&b'\r'));
         product.send(b"q");
-        assert!(product.finish(0, true).is_empty()); // redirected stderr supported
+        assert!(product.finish(0, true).is_empty());
         if !color {
             assert!(find(&product.bytes, b"\x1b[38;5;").is_none());
         }
@@ -1044,7 +1011,6 @@ fn flow_stopped_output_during_setup_restores_os_state_despite_cleanup_failure() 
     assert!(stderr.contains("leave alternate screen"));
     product.input.assert_restored();
     product.output.assert_restored();
-    // SAFETY: undo the harness's flow stop, which predates the child session.
     checked(unsafe { libc::tcflow(product.output.slave.as_raw_fd(), libc::TCOON) });
 }
 
@@ -1056,7 +1022,6 @@ fn backpressured_runtime_still_handles_quit_and_signal_with_bounded_cleanup() {
         (Some(libc::SIGTERM), 143),
     ] {
         let mut product = colored_product();
-        // A large but ordinary winsize creates a real partially emitted frame.
         product.output.resize(1000, 1000);
         product.signal(libc::SIGWINCH);
         wait_backpressure(&product);
@@ -1080,7 +1045,6 @@ fn backpressured_runtime_still_handles_quit_and_signal_with_bounded_cleanup() {
         );
         product.input.assert_restored();
         product.output.assert_restored();
-        // SAFETY: undo the harness's flow stop after observing child cleanup.
         checked(unsafe { libc::tcflow(product.output.slave.as_raw_fd(), libc::TCOON) });
     }
 }

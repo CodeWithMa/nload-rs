@@ -4,7 +4,7 @@ use super::*;
 use crate::monitor::{Rates, ViewState};
 use crate::proc_sampler::{AcquisitionError, Snapshot};
 use crate::terminal::scripted::{Call, ScriptClock, ScriptedEffects};
-use crate::terminal::scripted_session::ScriptSession;
+use crate::terminal::scripted_session::{Fault, ScriptSession};
 use crate::terminal::{HOOK_LOCK, Notifications};
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -438,24 +438,21 @@ fn colored_harness(ticks: Vec<Tick>) -> Harness {
 }
 
 fn observed_wire(selected: usize, width: usize, height: usize, rounds: usize) -> Vec<u8> {
-    let first = Ok(snapshot(&[(b"a", 0), (b"b", 0), (b"c", 0)]));
-    let mut monitor = Monitor::new(
-        first.as_ref().unwrap().startup(None).unwrap(),
+    let first = snapshot(&[(b"a", 0), (b"b", 0), (b"c", 0)]);
+    let mut monitor = Monitor::from_snapshot(
+        &first,
+        None,
         arguments::Ceilings {
             incoming: 128,
             outgoing: 128,
         },
         0,
-        |name| counter_outcome(&first, name),
-    );
+    )
+    .unwrap();
     for round in 1..=rounds {
         let totals = round as u64 * 128;
         let snapshot = Ok(snapshot(&[(b"a", totals), (b"b", totals), (b"c", totals)]));
-        monitor.observe(
-            round as u64 * SAMPLE_NS,
-            snapshot.iter().flat_map(|snapshot| snapshot.names()),
-            |name| counter_outcome(&snapshot, name),
-        );
+        monitor.observe_round(round as u64 * SAMPLE_NS, &snapshot);
     }
     for _ in 0..selected {
         monitor.forward();
@@ -586,8 +583,6 @@ fn handled_exits_after_every_colored_output_prefix_cancel_reset_and_restore() {
         (ColoredExit::Terminate, 143),
     ] {
         for split in 1..old.len() {
-            // Exit at the next deadline: shutdown must preempt that acquisition
-            // and any queued input/resize/output, even inside a UTF-8/SGR prefix.
             let exit = cause.tick();
             let mut h = colored_harness(vec![output_tick(SAMPLE_NS, Some(Ok(split))), exit]);
             assert_eq!(
@@ -682,7 +677,6 @@ fn colored_runtime_faults_and_panics_restore_before_diagnostics_and_prior_hook_p
                 Fault::ClockRegression => effects.clock.0.borrow_mut().readings.push_back(Ok(0)),
                 Fault::InputEof | Fault::AcquisitionPanic => {}
             }
-            // Poll failure needs another wait; keep the colored prefix blocked.
             if fault == Fault::Poll {
                 script
                     .writes
@@ -727,7 +721,7 @@ fn colored_exit_cleanup_errors_and_panics_preserve_status_and_attempt_all_stages
         .position(|bytes| bytes == "⢸".as_bytes())
         .unwrap()
         + 1;
-    for panics in [false, true] {
+    for fault in [Fault::Error, Fault::Panic] {
         for (cause, status) in [
             (ColoredExit::Quit, 1),
             (ColoredExit::UppercaseQuit, 1),
@@ -748,16 +742,12 @@ fn colored_exit_cleanup_errors_and_panics_preserve_status_and_attempt_all_stages
                 "restore-output",
                 "release",
             ] {
-                h.session
-                    .state
-                    .borrow_mut()
-                    .faults
-                    .insert(operation, panics);
+                h.session.state.borrow_mut().faults.insert(operation, fault);
             }
             assert_eq!(
                 h.run(&args(&["--color", "-i", "1", "-o", "1"])),
                 status,
-                "{cause:?}, cleanup panics={panics}"
+                "{cause:?}, cleanup fault={fault:?}"
             );
             h.restored();
             assert_eq!(h.effects.base.script.borrow().emitted, old[..split]);
@@ -1116,7 +1106,6 @@ fn runtime_failure_absence_addition_and_return_are_quiet_and_retain_membership()
             Tick::input(2 * SECOND + 1, b"q"),
         ],
     );
-    // Timeout-only wakes must not be modeled as readable EOF.
     for tick in h.effects.ticks.iter_mut().take(4) {
         tick.ready.input = false;
     }
@@ -1154,7 +1143,6 @@ fn runtime_additions_preserve_selected_identity_and_are_naturally_navigable() {
         b"lo",
     ];
     for reverse_rows in [false, true] {
-        // Exercise every arrow, including wrapping, without more sampling.
         for (arrow, order) in [
             (b"\x1b[C", vec![3, 4, 5, 6, 7, 0, 1, 2, 3]),
             (b"\x1b[B", vec![3, 4, 5, 6, 7, 0, 1, 2, 3]),
@@ -1631,7 +1619,6 @@ fn regressing_completion_clocks_stop_before_discovery_selection_and_statistics()
                 clock.0.borrow_mut().readings.push_back(Ok(completion));
             }
         }));
-        // Runtime rejects backward clock reads before monitor ingestion.
         assert_eq!(h.run(&args(&["wg0"])), 1);
         let view = h.view.as_ref().unwrap();
         assert_eq!(view.name, b"eth2");
@@ -1708,7 +1695,7 @@ fn backpressure_and_partial_frames_preserve_sampling_and_latest_redraw() {
     assert_eq!(h.plain(), 0);
     assert_eq!(h.counters.calls, 2);
     let emitted = h.emitted();
-    assert!(!emitted.contains("Interface a")); // untouched baseline replaced
+    assert!(!emitted.contains("Interface a"));
     let old = emitted.find("Interface b").unwrap();
     let latest = emitted.find("Interface c").unwrap();
     assert!(old < latest);
@@ -1874,7 +1861,11 @@ fn initialization_and_caught_startup_runtime_panics_use_the_guarded_application_
         "hide",
     ] {
         let mut h = Harness::new(&[(b"a", 0)], vec![]);
-        h.session.state.borrow_mut().faults.insert(name, false);
+        h.session
+            .state
+            .borrow_mut()
+            .faults
+            .insert(name, Fault::Error);
         h.probe_hook = true;
         assert_eq!(h.plain(), 1);
         assert!(String::from_utf8_lossy(&h.stderr).contains(name));
@@ -1889,7 +1880,11 @@ fn initialization_and_caught_startup_runtime_panics_use_the_guarded_application_
         match variant {
             0 => h.counters.panic_at = Some(1),
             1 => {
-                h.session.state.borrow_mut().faults.insert("hide", true);
+                h.session
+                    .state
+                    .borrow_mut()
+                    .faults
+                    .insert("hide", Fault::Panic);
             }
             2 => h.counters.panic_at = Some(2),
             _ => unreachable!(),
@@ -1919,7 +1914,11 @@ fn real_loop_quit_interrupt_term_and_cleanup_fault_arbitration() {
             "restore-input",
             "restore-output",
         ] {
-            h.session.state.borrow_mut().faults.insert(name, false);
+            h.session
+                .state
+                .borrow_mut()
+                .faults
+                .insert(name, Fault::Error);
         }
         assert_eq!(h.plain(), if status == 0 { 1 } else { status });
         h.restored();

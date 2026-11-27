@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Linux terminal session, timing, input decoding and nonblocking frame output.
-//! Session restoration also covers incomplete initialization.
-
 mod input;
 mod linux;
 mod runtime;

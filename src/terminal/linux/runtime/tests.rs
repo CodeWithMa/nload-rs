@@ -110,7 +110,6 @@ fn poll_detects_each_owned_fd_hangup_error_and_invalid_descriptor() {
         let mut fds = [pollfd(-1, 0); 4];
         fds[index] = pollfd(reader.as_raw_fd(), libc::POLLIN);
         assert!(poll(&mut fds, Some(0)).is_err(), "hangup index {index}");
-        // Use a number that is not open, without closing a live OwnedFd.
         fds[index] = pollfd(i32::MAX, libc::POLLIN);
         assert!(poll(&mut fds, Some(0)).is_err(), "invalid index {index}");
     }
@@ -125,14 +124,13 @@ fn poll_detects_each_owned_fd_hangup_error_and_invalid_descriptor() {
 fn timer_effect_errors_and_incomplete_reads_are_fatal() {
     let mut clock = LinuxClock::new().unwrap();
     let (reader, writer) = pipe();
-    // Replacing ownership closes the real timer without dangling/double-close.
     clock.timer = reader;
     assert!(clock.arm(1).is_err(), "pipe is not a timerfd");
-    clock.consume().unwrap(); // EAGAIN is only a spurious wake.
+    clock.consume().unwrap();
     write(&writer, b"short").unwrap();
     assert!(clock.consume().is_err());
     drop(writer);
-    assert!(clock.consume().is_err()); // EOF, not unavailable counters.
+    assert!(clock.consume().is_err());
 }
 
 #[test]
@@ -186,7 +184,6 @@ fn real_nonblocking_backpressure_does_not_hide_input_signal_or_timer_readiness()
     };
     let mut clock = LinuxClock::new().unwrap();
     let future = clock.now().unwrap().checked_add(60_000_000_000).unwrap();
-    // Fill the real output pipe to capacity before a frame is submitted.
     let output = terminal.output.as_ref().unwrap();
     while write(output, &[b'x'; 4096]).is_ok() {}
     write(&input_writer, b"\x1b[").unwrap();
@@ -214,7 +211,7 @@ fn real_nonblocking_backpressure_does_not_hide_input_signal_or_timer_readiness()
         16,
         true,
     )));
-    runtime.output_batch().unwrap(); // Actual EAGAIN, no wait.
+    runtime.output_batch().unwrap();
     let ready = runtime.wait(future).unwrap();
     assert_eq!(
         ready,
@@ -234,7 +231,6 @@ fn real_nonblocking_backpressure_does_not_hide_input_signal_or_timer_readiness()
     );
     assert!(runtime.has_pending_output());
     assert!(runtime.now().is_ok());
-    // A due timer still wakes while output is full; expiration count is consumed.
     assert!(runtime.wait(0).unwrap().timer);
     drop(runtime);
     drop(output_reader);

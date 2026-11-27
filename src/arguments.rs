@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Parse OS arguments and provide help and version text.
-
 use std::ffi::OsString;
 use std::fmt;
 use std::os::unix::ffi::OsStrExt;
@@ -9,7 +7,6 @@ use std::os::unix::ffi::OsStrExt;
 pub(crate) const DEFAULT_CEILING_KBIT: u64 = 10240;
 pub(crate) const DEFAULT_CEILING_BYTES: u64 = DEFAULT_CEILING_KBIT * 128;
 
-/// Positive bytes/s ceilings shared by every retained interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Ceilings {
     pub(crate) incoming: u64,
@@ -27,7 +24,6 @@ impl Default for Ceilings {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RunConfig {
-    /// Original bytes, never a displayed/escaped or lossy name.
     pub(crate) interface: Option<Vec<u8>>,
     pub(crate) ceilings: Ceilings,
     pub(crate) color: bool,
@@ -51,7 +47,6 @@ impl fmt::Display for ArgumentError {
 
 impl std::error::Error for ArgumentError {}
 
-/// Parse `std::env::args_os().skip(1)` (the executable token is excluded).
 pub(crate) fn parse(
     tokens: impl IntoIterator<Item = OsString>,
 ) -> Result<Invocation, ArgumentError> {
@@ -246,7 +241,7 @@ mod tests {
         }
         assert_eq!(run(&["ETH0"]).interface, Some(b"ETH0".to_vec()));
         assert_eq!(run(&["--"]).interface, None);
-        assert_eq!(run(&[""]).interface, Some(vec![])); // selection validates existence
+        assert_eq!(run(&[""]).interface, Some(vec![]));
         assert!(invoke(&["--", "eth0", "-i", "1"]).is_err());
     }
 
@@ -357,7 +352,6 @@ mod tests {
         let long_one = format!("{long_zero}1");
         assert_eq!(run(&["-i", &long_one]).ceilings.incoming, 128);
         assert!(parse([OsString::from("-i"), OsString::from_vec(vec![0xff])]).is_err());
-        // Every occurrence must validate even if a later value would replace it.
         assert!(invoke(&["-i", "bad", "-i", "1"]).is_err());
     }
 }

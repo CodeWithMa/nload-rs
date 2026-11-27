@@ -79,8 +79,6 @@ impl SessionOps for LinuxTerminal {
     }
 
     fn prepare_notifications(&mut self) -> io::Result<()> {
-        // Store the owner before registering any actions. A later registration
-        // failure leaves every earlier registration available for cleanup.
         self.signals = Some(SignalPipe::new()?);
         self.signals
             .as_mut()
@@ -92,7 +90,6 @@ impl SessionOps for LinuxTerminal {
         let mut raw = *saved;
         // SAFETY: initialized local termios, then a valid owned terminal FD.
         unsafe { libc::cfmakeraw(&mut raw) };
-        // Nonblocking input: no minimum byte count/timeout wait inside read.
         raw.c_cc[libc::VMIN] = 1;
         raw.c_cc[libc::VTIME] = 0;
         cvt(unsafe { libc::tcsetattr(self.input_fd()?.as_raw_fd(), libc::TCSANOW, &raw) })?;
@@ -172,7 +169,6 @@ impl SessionOps for LinuxTerminal {
     }
 
     fn release_notifications(&mut self) {
-        // Drop unregisters writers/flag actions before closing the reader.
         self.signals = None;
     }
 }
@@ -193,8 +189,6 @@ struct SignalFlags {
 
 impl SignalFlags {
     fn inspect(&self) -> Notifications {
-        // Sticky termination flags preserve arbitration across repeated checks.
-        // Read INT last so it wins over a TERM already observed in this check.
         let terminate = self.terminate.load(Ordering::SeqCst);
         let interrupt = self.interrupt.load(Ordering::SeqCst);
         Notifications {
@@ -316,8 +310,6 @@ mod tests {
     fn registered_signals_wake_and_unregister_without_owned_fd_leaks() {
         const CHILD: &str = "NLOAD_RS_SIGNAL_TEST_CHILD";
         if std::env::var_os(CHILD).is_none() {
-            // Isolate process-global signal registrations from the parallel Rust
-            // test harness. These are test-harness flags, never product flags.
             let result = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "terminal::linux::tests::registered_signals_wake_and_unregister_without_owned_fd_leaks", "--test-threads=1"])
                 .env(CHILD, "1")
@@ -404,7 +396,6 @@ mod tests {
             -1
         );
         assert_eq!(io::Error::last_os_error().kind(), io::ErrorKind::WouldBlock);
-        // Sticky shutdown and one-shot resize are independent of wake tokens.
         assert_eq!(
             pipe.inspect().unwrap(),
             Notifications {

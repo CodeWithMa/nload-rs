@@ -107,7 +107,6 @@ impl SessionOps for Script {
     }
 
     fn prepare_notifications(&mut self) -> io::Result<()> {
-        // Even a partially successful registration is owned for cleanup.
         self.state.borrow_mut().registered = true;
         self.step("prepare")?;
         Ok(())
@@ -252,8 +251,6 @@ fn explicit_and_drop_cleanup_cancel_partial_sgr_and_reset_before_screen_restorat
             for explicit in [true, false] {
                 let (mut session, state) = Script::new();
                 session.initialize().unwrap();
-                // Runtime output may stop at any byte, including midway through an
-                // actual screen-constructed UTF-8 glyph, foreground or reset escape.
                 state
                     .borrow_mut()
                     .emitted
@@ -614,7 +611,6 @@ fn zero_write_is_fatal_and_still_restores_the_attempted_screen_change() {
 fn small_and_resized_dimensions_are_not_session_failures() {
     use std::os::unix::ffi::OsStringExt;
     let (mut session, state) = Script::new();
-    // Other declarations, even non-UTF-8, are declarations, not capability probes.
     session.ops.support.as_mut().unwrap().term = Some(OsString::from_vec(b"XTERM\xff".to_vec()));
     state.borrow_mut().dimensions = (0, 0);
     assert_eq!(session.initialize().unwrap(), (0, 0));

@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Pure traffic statistics, retained interface membership and navigation.
-//!
-//! Owns statistics runs, availability, exact deltas, windows, extrema and history.
-//! Exposes selected read-only views; performs no I/O, clock reads or sizing.
-
 use std::collections::VecDeque;
 
 use crate::arguments::Ceilings;
-use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection, natural_order};
+use crate::proc_sampler::{
+    AcquisitionError, CounterOutcome, Counters, Snapshot, StartupError, StartupSelection,
+    counter_outcome, natural_order,
+};
 
 const SECOND_NS: u64 = 1_000_000_000;
 const HISTORY_NS: u64 = 300 * SECOND_NS;
 
-/// Availability of the selected entry. Baseline has totals but no measured rates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewState {
     Baseline,
@@ -22,7 +19,6 @@ pub(crate) enum ViewState {
     ReadFailed,
 }
 
-/// Unrounded bytes/s; extrema belong to the entire uninterrupted statistics run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Rates {
     pub(crate) current: f64,
@@ -33,13 +29,10 @@ pub(crate) struct Rates {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GraphSample {
-    /// Integer BOOTTIME nanoseconds at acquisition completion.
     pub(crate) at: u64,
     pub(crate) rate: f64,
 }
 
-/// History is chronological, including real zero-height samples. Rendering takes
-/// the newest fitting suffix without modifying it or manufacturing blank samples.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct DirectionView<'a> {
     pub(crate) total: Option<u64>,
@@ -51,7 +44,6 @@ pub(crate) struct DirectionView<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SelectedView<'a> {
     pub(crate) name: &'a [u8],
-    /// One-based header position in the naturally sorted retained collection.
     pub(crate) position: usize,
     pub(crate) count: usize,
     pub(crate) state: ViewState,
@@ -59,8 +51,6 @@ pub(crate) struct SelectedView<'a> {
     pub(crate) outgoing: DirectionView<'a>,
 }
 
-/// One bulk round discovers new names and observes every retained entry.
-/// Neither construction nor observation knows about proc, clocks or dimensions.
 pub(crate) struct Monitor {
     entries: Vec<Entry>,
     selected: usize,
@@ -70,9 +60,26 @@ pub(crate) struct Monitor {
 }
 
 impl Monitor {
-    /// `startup` is the validated nonempty ordered list/zero-based selection from
-    /// discovery; ceilings must be positive (Arguments already guarantees this).
-    /// Reuse the discovery snapshot via the lookup, timestamped at completion.
+    pub(crate) fn from_snapshot(
+        snapshot: &Snapshot,
+        requested: Option<&[u8]>,
+        ceilings: Ceilings,
+        at: u64,
+    ) -> Result<Self, StartupError> {
+        let startup = snapshot.startup(requested)?;
+        Ok(Self::new(startup, ceilings, at, |name| {
+            snapshot
+                .get(name)
+                .map_or(CounterOutcome::Absent, CounterOutcome::Readable)
+        }))
+    }
+
+    pub(crate) fn observe_round(&mut self, at: u64, round: &Result<Snapshot, AcquisitionError>) {
+        self.observe(at, round.iter().flat_map(Snapshot::names), |name| {
+            counter_outcome(round, name)
+        });
+    }
+
     pub(crate) fn new(
         startup: StartupSelection,
         ceilings: Ceilings,
@@ -97,10 +104,6 @@ impl Monitor {
         }
     }
 
-    /// Ignore rounds that don't advance the completion timestamp.
-    /// Supply all names from a validated successful snapshot, or none on failure.
-    /// Additions preserve selected identity unless they fulfill a pending startup
-    /// request.
     pub(crate) fn observe<'a>(
         &mut self,
         at: u64,
@@ -142,7 +145,6 @@ impl Monitor {
         self.latest_at = at;
     }
 
-    /// Right/Down, one decoded event at a time. Does not sample or reset.
     pub(crate) fn forward(&mut self) {
         self.selected = if self.selected + 1 == self.entries.len() {
             0
@@ -151,7 +153,6 @@ impl Monitor {
         };
     }
 
-    /// Left/Up, with symmetric wrapping. Does not sample or reset.
     pub(crate) fn backward(&mut self) {
         self.selected = if self.selected == 0 {
             self.entries.len() - 1
@@ -160,7 +161,6 @@ impl Monitor {
         };
     }
 
-    /// No time/dimensions parameter: a read/redraw can never expire history.
     pub(crate) fn selected_view(&self) -> SelectedView<'_> {
         let entry = &self.entries[self.selected];
         let (state, totals, incoming, outgoing) = match &entry.state {
@@ -248,7 +248,6 @@ impl Run {
         ) {
             (Some(incoming), Some(outgoing)) => Counters { incoming, outgoing },
             _ => {
-                // A decrease in either direction starts a *paired* new baseline.
                 *self = Self::new(at, totals);
                 return;
             }
@@ -262,8 +261,6 @@ impl Run {
         self.totals = totals;
 
         let oldest = at.saturating_sub(HISTORY_NS);
-        // Keep the interval crossing the boundary; an interval ending exactly
-        // there contributes nothing to either current or average calculations.
         while self.intervals.front().is_some_and(|j| j.end <= oldest) {
             self.intervals.pop_front();
         }
@@ -400,7 +397,6 @@ mod tests {
         }
     }
 
-    // An owned copy of only the caller-facing view, never monitor bookkeeping.
     fn saved(view: SelectedView<'_>) -> String {
         format!("{view:?}")
     }
@@ -465,12 +461,11 @@ mod tests {
         rates(view.outgoing, [2000.0; 4]);
         assert_eq!(view.incoming.samples.len(), 1);
         assert_eq!(view.incoming.samples[0].at, 17 + 3 * SECOND_NS);
-        // A long suspend-equivalent interval still contributes only one sample.
         observe(&mut monitor, 17 + 603 * SECOND_NS, 63400, 126800);
         let view = monitor.selected_view();
         rates(view.incoming, [100.0, 100.0, 100.0, 1000.0]);
         rates(view.outgoing, [200.0, 200.0, 200.0, 2000.0]);
-        assert_eq!(view.incoming.samples.len(), 1); // old sample expired
+        assert_eq!(view.incoming.samples.len(), 1);
     }
 
     #[test]
@@ -523,8 +518,6 @@ mod tests {
             );
             assert_eq!(saved(monitor.selected_view()), before);
         }
-        // Ignored appearances cannot consume the request: its first accepted
-        // appearance still adds and selects it with a fresh baseline.
         monitor.observe(
             15 * SECOND_NS,
             appeared.iter().flat_map(|snapshot| snapshot.names()),
@@ -597,8 +590,7 @@ mod tests {
         observe(&mut monitor, 302 * SECOND_NS + 1, 602, 904);
         let view = monitor.selected_view();
         rates(view.incoming, [2.0, 2.0, fractional, 2.0]);
-        assert_eq!(view.incoming.samples.len(), 2); // t=2+1 ns boundary retained
-        // Average/history expiry does not expire the older minimum.
+        assert_eq!(view.incoming.samples.len(), 2);
         observe(&mut monitor, 303 * SECOND_NS + 1, 602, 904);
         let view = monitor.selected_view();
         assert_eq!(view.state, ViewState::Measured);
@@ -714,7 +706,6 @@ mod tests {
             assert_eq!(view.count, 3);
             assert_eq!(view.incoming.ceiling, ceilings.incoming);
             assert_eq!(view.outgoing.ceiling, ceilings.outgoing);
-            // Numeric rates stay above graph ceilings, never capped.
             assert_eq!(view.incoming.rates.unwrap().current, 5_242_880.0);
             assert_eq!(view.outgoing.rates.unwrap().current, 1_310_720.0);
             expected.push(saved(view));
@@ -756,27 +747,16 @@ mod tests {
     fn snapshot_lifecycle_retains_raw_membership_selection_and_retries_all_names() {
         let raw = b"A\xff".as_slice();
         let initial = snapshot(&[(raw, 100, 200), (b"B", 1000, 2000)]);
-        let startup = initial.startup(Some(raw)).unwrap();
-        let initial = Ok(initial);
-        let mut monitor = Monitor::new(startup, Ceilings::default(), 0, |name| {
-            counter_outcome(&initial, name)
-        });
+        let mut monitor =
+            Monitor::from_snapshot(&initial, Some(raw), Ceilings::default(), 0).unwrap();
         let next = Ok(snapshot(&[(raw, 200, 400), (b"B", 1100, 2200)]));
-        monitor.observe(
-            SECOND_NS,
-            next.iter().flat_map(|snapshot| snapshot.names()),
-            |name| counter_outcome(&next, name),
-        );
+        monitor.observe_round(SECOND_NS, &next);
         let removed = Ok(snapshot(&[
             (b"renamed", 90000, 90000),
             (b"B", 1200, 2400),
             (b"C", 5, 6),
         ]));
-        monitor.observe(
-            2 * SECOND_NS,
-            removed.iter().flat_map(|snapshot| snapshot.names()),
-            |name| counter_outcome(&removed, name),
-        );
+        monitor.observe_round(2 * SECOND_NS, &removed);
         let view = monitor.selected_view();
         assert_eq!(view.name, raw);
         assert_eq!((view.position, view.count), (1, 4));
@@ -786,10 +766,9 @@ mod tests {
         assert_eq!(monitor.selected_view().incoming.samples.len(), 2);
         monitor.backward();
         assert_eq!(monitor.selected_view().name, raw);
-        // A global parse failure affects even the successfully measured B.
         let failed =
             Snapshot::parse(b"malformed\n").map_err(crate::proc_sampler::AcquisitionError::Parse);
-        monitor.observe(3 * SECOND_NS, [], |name| counter_outcome(&failed, name));
+        monitor.observe_round(3 * SECOND_NS, &failed);
         unavailable(monitor.selected_view(), ViewState::ReadFailed);
         monitor.forward();
         unavailable(monitor.selected_view(), ViewState::ReadFailed);
@@ -798,11 +777,7 @@ mod tests {
             (b"B", 2000, 3000),
             (b"C", 7, 8),
         ]));
-        monitor.observe(
-            4 * SECOND_NS,
-            returned.iter().flat_map(|snapshot| snapshot.names()),
-            |name| counter_outcome(&returned, name),
-        );
+        monitor.observe_round(4 * SECOND_NS, &returned);
         baseline(monitor.selected_view(), 2000, 3000);
         monitor.backward();
         baseline(monitor.selected_view(), 50000, 90000);
@@ -864,20 +839,17 @@ mod tests {
         observe(&mut monitor, SECOND_NS - 1, 0, 0);
         observe(&mut monitor, SECOND_NS, 0, 0);
         observe(&mut monitor, SECOND_NS + 1, 0, 0);
-        // Populate more than the 100 samples a normal 50-cell graph can show.
         for second in 2..=301 {
             observe(&mut monitor, second * SECOND_NS, second * 10, second * 20);
         }
         let view = monitor.selected_view();
         let retained: Vec<_> = view.incoming.samples.iter().copied().collect();
         assert_eq!(retained.len(), 302);
-        assert_eq!(retained[0].at, SECOND_NS); // t-300 exactly retained
-        assert_eq!(retained[0].rate, 0.0); // genuine zero occupies a half-cell
+        assert_eq!(retained[0].at, SECOND_NS);
+        assert_eq!(retained[0].rate, 0.0);
         assert_eq!(retained[1].at, SECOND_NS + 1);
         assert_eq!(retained.last().unwrap().at, 301 * SECOND_NS);
         let before = saved(view);
-        // Consumer-side fitting demonstrates shrink/grow cannot mutate/expire:
-        // no dimensions or redraw clock are accepted by the monitor interface.
         for (width, count) in [(50, 100), (1, 2), (0, 0), (400, 302), (50, 100)] {
             let samples = monitor.selected_view().incoming.samples;
             let fitting: Vec<_> = samples

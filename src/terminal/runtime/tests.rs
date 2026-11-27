@@ -48,9 +48,6 @@ fn colored_frame(name: &[u8], width: usize, height: usize) -> crate::screen::Fra
     crate::screen::render(monitor.selected_view(), width, height, true)
 }
 
-// The transport oracle takes the screen's public encoded rows as payload, with
-// literal session-independent addressing from the wire contract. Screen glyph
-// and palette correctness has separate exact oracles in screen::tests.
 fn wire(frame: &crate::screen::Frame) -> Vec<u8> {
     let mut bytes = b"\x1b[0m\x1b[H\x1b[2J".to_vec();
     for (row, payload) in frame.encoded_rows().iter().enumerate() {
@@ -72,8 +69,6 @@ fn every_colored_frame_byte_boundary_resumes_exactly_before_the_latest_frame() {
     }
     let complete = [expected.as_slice(), wire(&latest).as_slice()].concat();
     for transient in [io::ErrorKind::Interrupted, io::ErrorKind::WouldBlock] {
-        // Every byte offset includes each interior byte of all twelve foreground
-        // SGRs, every reset, all three UTF-8 glyph bytes and positioning commands.
         for split in 1..expected.len() {
             let effects = ScriptedEffects::default();
             let mut runtime = Runtime::new(effects.clone());
@@ -91,7 +86,6 @@ fn every_colored_frame_byte_boundary_resumes_exactly_before_the_latest_frame() {
             assert_eq!(effects.script.borrow().emitted, expected[..split]);
             assert_eq!(feed(&mut runtime, &effects, b"\x1b[C", 0), [Event::Forward]);
             assert!(!runtime.queue_frame(&latest));
-            // A second short write proves the offset survives multiple batches.
             effects.script.borrow_mut().writes.push_back(Ok(1));
             runtime.output_batch().unwrap();
             runtime.output_batch().unwrap();
@@ -287,7 +281,6 @@ fn unknown_modified_and_string_sequences_consume_command_looking_bytes() {
         b"\x1b^qQ\x1b\\",
         b"\x1b_qQ\x1b\\",
     ] {
-        // Every byte separately, including string ST split after ESC.
         for byte in sequence {
             assert!(
                 feed(&mut runtime, &effects, &[*byte], 0).is_empty(),
@@ -386,7 +379,6 @@ fn sustained_input_and_overlong_sequences_are_bounded_and_discarded() {
             .iter()
             .all(|call| matches!(call, Call::Read(256)))
     );
-    // Overflow does not restore plain mode until idle timeout, either.
     feed(
         &mut runtime,
         &effects,
@@ -482,7 +474,6 @@ fn backpressure_keeps_clock_input_signals_resize_and_timer_effects_available() {
     );
     assert!(runtime.has_pending_output());
     assert!(effects.script.borrow().emitted.is_empty());
-    // Every wait includes pending output readiness, without a write-only wait.
     assert!(
         effects
             .script
@@ -550,7 +541,6 @@ fn input_eof_and_effect_faults_are_fatal_while_transient_io_yields() {
         io::ErrorKind::BrokenPipe
     );
     for result in [Ok(0), Ok(usize::MAX), Err(io::ErrorKind::BrokenPipe.into())] {
-        // Each fatal result has its own owner: a started frame cannot be replaced.
         let mut runtime = Runtime::new(effects.clone());
         assert!(runtime.queue_frame(&frame(b"eth0", 1, 1)));
         effects.script.borrow_mut().writes.push_back(result);

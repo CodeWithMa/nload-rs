@@ -1,6 +1,4 @@
 <!doctype html>
-<!-- THROWAWAY: three single-interface terminal layouts, ?variant=A/B/C.
-     Synthetic snapshots only: no network reads, clocks, persistence or application code. -->
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,7 +43,6 @@ const params = new URLSearchParams(location.search);
 let variant = titles[params.get('variant')] ? params.get('variant') : 'A';
 let selected = 0;
 const byId = id => document.getElementById(id);
-// A frozen pool of observations, separately retained for each synthetic interface.
 const histories = names.map((_, n) => Array.from({ length: 180 }, (_, i) =>
   Math.max(0, Math.min(1.35, .42 + .3 * Math.sin((i + n * 9) / 8) + .14 * Math.sin(i / 2.5)))));
 function values(direction, state) {
@@ -76,7 +73,6 @@ function render() {
     if (!available) return;
     const samples = histories[selected].slice(-width);
     samples.forEach((v, i) => {
-      // Representative history; this is NOT a statistics implementation.
       const ratio = state === 'idle' ? 0 : state === 'saturated' && !direction ? 1.4
         : v * (direction ? .08 : 1) * 10 / ceilings[direction];
       const filled = Math.min(1, ratio) * height;

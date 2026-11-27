@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-//! Session effects for complete application startup/cleanup scripts.
-
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io;
@@ -11,11 +9,17 @@ use std::time::Duration;
 use super::{Notifications, Saved, SessionOps, Support};
 use crate::terminal::scripted::ScriptClock;
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Fault {
+    Error,
+    Panic,
+}
+
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) calls: Vec<&'static str>,
     pub(crate) log: Option<Rc<RefCell<Vec<&'static str>>>>,
-    pub(crate) faults: BTreeMap<&'static str, bool>, // true panics, false errors
+    pub(crate) faults: BTreeMap<&'static str, Fault>,
     pub(crate) dimensions: Option<(usize, usize)>,
     pub(crate) init_delay: u64,
     pub(crate) unsupported: bool,
@@ -39,8 +43,8 @@ impl ScriptSession {
             state.faults.remove(name)
         };
         match fault {
-            Some(true) => panic!("scripted {name} panic"),
-            Some(false) => Err(io::Error::other(format!("scripted {name} failure"))),
+            Some(Fault::Panic) => panic!("scripted {name} panic"),
+            Some(Fault::Error) => Err(io::Error::other(format!("scripted {name} failure"))),
             None => Ok(()),
         }
     }

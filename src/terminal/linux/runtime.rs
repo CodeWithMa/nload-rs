@@ -8,8 +8,6 @@ use super::{LinuxTerminal, cvt};
 use crate::terminal::runtime::{Clock, Ready, RuntimeEffects};
 use crate::terminal::session::{Notifications, SessionOps};
 
-/// Owns an absolute CLOCK_BOOTTIME timerfd and validates clock readings. Created
-/// before discovery, borrowed during runtime, dropped normally on every exit.
 pub(crate) struct LinuxClock {
     timer: OwnedFd,
     previous: Option<u64>,
@@ -59,7 +57,6 @@ impl LinuxClock {
             )
         };
         if read == size_of::<u64>() as isize {
-            // Counts are wake information, never a requested number of samples.
             return Ok(());
         }
         if read < 0 {
@@ -118,8 +115,6 @@ fn nanoseconds_to_timespec(nanos: u64) -> io::Result<libc::timespec> {
     })
 }
 
-/// Borrows session-owned FDs rather than extending their lifetimes or taking
-/// restoration ownership. The application never receives raw descriptors.
 pub(crate) struct LinuxRuntime<'a> {
     terminal: &'a mut LinuxTerminal,
     clock: &'a mut LinuxClock,
@@ -199,8 +194,6 @@ fn pollfd(fd: i32, events: i16) -> libc::pollfd {
 }
 
 fn poll(fds: &mut [libc::pollfd; 4], idle_ns: Option<u64>) -> io::Result<Ready> {
-    // Ceil sub-ms deadlines, cap huge waits (a harmless earlier wake). No clock
-    // fallback: callers inspect BOOTTIME again after every wake/timeout/EINTR.
     let milliseconds = idle_ns.map_or(-1, |nanos| {
         nanos.div_ceil(1_000_000).min(i32::MAX as u64) as i32
     });

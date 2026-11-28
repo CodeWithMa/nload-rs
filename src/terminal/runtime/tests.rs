@@ -2,7 +2,7 @@
 
 use super::scripted::{Call, ScriptedEffects};
 use super::*;
-use crate::arguments::Ceilings;
+use crate::arguments::{CeilingPolicy::Fixed, Ceilings};
 use crate::monitor::Monitor;
 use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
 
@@ -33,8 +33,8 @@ fn colored_frame(name: &[u8], width: usize, height: usize) -> crate::screen::Fra
     let mut monitor = baseline_monitor(
         name,
         Ceilings {
-            incoming: 24,
-            outgoing: 24,
+            incoming: Fixed(24),
+            outgoing: Fixed(24),
         },
     );
     for (at, total) in [(1_000_000_000, 24), (2_000_000_000, 48)] {

@@ -8,18 +8,21 @@ pub(crate) const DEFAULT_CEILING_KBIT: u64 = 10240;
 pub(crate) const DEFAULT_CEILING_BYTES: u64 = DEFAULT_CEILING_KBIT * 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Ceilings {
-    pub(crate) incoming: u64,
-    pub(crate) outgoing: u64,
+pub(crate) enum CeilingPolicy {
+    Fixed(u64),
+    Auto,
 }
 
-impl Default for Ceilings {
+impl Default for CeilingPolicy {
     fn default() -> Self {
-        Self {
-            incoming: DEFAULT_CEILING_BYTES,
-            outgoing: DEFAULT_CEILING_BYTES,
-        }
+        Self::Fixed(DEFAULT_CEILING_BYTES)
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Ceilings {
+    pub(crate) incoming: CeilingPolicy,
+    pub(crate) outgoing: CeilingPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,11 +62,11 @@ pub(crate) fn parse(
         }
     }
 
-    let mut config = RunConfig {
-        interface: None,
-        ceilings: Ceilings::default(),
-        color: false,
-    };
+    let mut interface = None;
+    let mut color = false;
+    let mut auto_scale = false;
+    let mut incoming = None;
+    let mut outgoing = None;
     let mut options = true;
     let mut tokens = tokens.iter();
     while let Some(token) = tokens.next() {
@@ -75,7 +78,11 @@ pub(crate) fn parse(
                     continue;
                 }
                 b"--color" => {
-                    config.color = true;
+                    color = true;
+                    continue;
+                }
+                b"--auto-scale" => {
+                    auto_scale = true;
                     continue;
                 }
                 b"-i" | b"-o" => {
@@ -84,9 +91,9 @@ pub(crate) fn parse(
                         .ok_or(ArgumentError("ceiling option requires a separate value"))?;
                     let ceiling = parse_ceiling(value.as_bytes())?;
                     if bytes == b"-i" {
-                        config.ceilings.incoming = ceiling;
+                        incoming = Some(ceiling);
                     } else {
-                        config.ceilings.outgoing = ceiling;
+                        outgoing = Some(ceiling);
                     }
                     continue;
                 }
@@ -101,12 +108,24 @@ pub(crate) fn parse(
                 _ => {}
             }
         }
-        if config.interface.is_some() {
+        if interface.is_some() {
             return Err(ArgumentError("at most one interface name is allowed"));
         }
-        config.interface = Some(bytes.to_vec());
+        interface = Some(bytes.to_vec());
     }
-    Ok(Invocation::Run(config))
+    let default = if auto_scale {
+        CeilingPolicy::Auto
+    } else {
+        CeilingPolicy::default()
+    };
+    Ok(Invocation::Run(RunConfig {
+        interface,
+        ceilings: Ceilings {
+            incoming: incoming.map_or(default, CeilingPolicy::Fixed),
+            outgoing: outgoing.map_or(default, CeilingPolicy::Fixed),
+        },
+        color,
+    }))
 }
 
 fn parse_ceiling(bytes: &[u8]) -> Result<u64, ArgumentError> {
@@ -134,7 +153,7 @@ pub(crate) fn version_text() -> String {
 
 pub(crate) fn help_text() -> String {
     format!(
-        "Usage: {name} [--color] [-i VALUE] [-o VALUE] [--] [INTERFACE]\n\
+        "Usage: {name} [--color] [--auto-scale] [-i VALUE] [-o VALUE] [--] [INTERFACE]\n\
          \x20      {name} --help\n\
          \x20      {name} --version\n\n\
          Monitor one interface; arrows navigate the naturally sorted collection.\n\
@@ -147,10 +166,12 @@ pub(crate) fn help_text() -> String {
          VALUE is ASCII decimal binary-scaled kBit/s (1 kBit/s = 1024 Bit/s\n\
          = 128 bytes/s), from 1 through 144115188075855871.\n\
          Each direction defaults independently to {default} kBit/s (10.00 MBit/s).\n\
-         Zero restores that direction's default; repeated options use the last value.\n\
-          Ceiling values must be separate tokens; options may precede or follow a name.\n\
-          --color   Enable colored Braille graphs (off by default; ignores NO_COLOR).\n\
-          --help and --version are standalone; no short aliases are accepted.\n",
+         Zero restores that direction's fixed default, even with --auto-scale.\n\
+         Repeated options use the last value.\n\
+         Ceiling values must be separate tokens; options may precede or follow a name.\n\
+         --auto-scale  Adapt each graph's ceiling to traffic unless -i or -o fixes it.\n\
+         --color   Enable colored Braille graphs (off by default; ignores NO_COLOR).\n\
+         --help and --version are standalone; no short aliases are accepted.\n",
         name = env!("CARGO_PKG_NAME"),
         default = DEFAULT_CEILING_KBIT,
     )
@@ -159,6 +180,7 @@ pub(crate) fn help_text() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use CeilingPolicy::{Auto, Fixed};
     use std::os::unix::ffi::OsStringExt;
 
     fn invoke(tokens: &[&str]) -> Result<Invocation, ArgumentError> {
@@ -186,6 +208,9 @@ mod tests {
             "INTERFACE",
             "-i VALUE",
             "-o VALUE",
+            "--auto-scale",
+            "unless -i or -o fixes it",
+            "fixed default, even with --auto-scale",
             "--color",
             "off by default",
             "ignores NO_COLOR",
@@ -222,6 +247,8 @@ mod tests {
             vec!["--color", "--help"],
             vec!["--version", "--color"],
             vec!["--color=always"],
+            vec!["--auto-scale=always"],
+            vec!["--auto-scale", "--help"],
             vec!["--", "eth0", "eth1"],
         ] {
             let error = invoke(&tokens).expect_err(&format!("accepted {tokens:?}"));
@@ -236,13 +263,78 @@ mod tests {
             panic!("expected run");
         };
         assert_eq!(config.interface, Some(name));
-        for name in ["-eth0", "--help", "--version", "--color", "-i", "--"] {
+        for name in [
+            "-eth0",
+            "--help",
+            "--version",
+            "--color",
+            "--auto-scale",
+            "-i",
+            "--",
+        ] {
             assert_eq!(run(&["--", name]).interface, Some(name.as_bytes().to_vec()));
         }
         assert_eq!(run(&["ETH0"]).interface, Some(b"ETH0".to_vec()));
         assert_eq!(run(&["--"]).interface, None);
         assert_eq!(run(&[""]).interface, Some(vec![]));
         assert!(invoke(&["--", "eth0", "-i", "1"]).is_err());
+    }
+
+    #[test]
+    fn automatic_scaling_yields_to_explicit_ceilings_in_either_order() {
+        assert_eq!(
+            run(&["--auto-scale", "eth0"]).ceilings,
+            Ceilings {
+                incoming: Auto,
+                outgoing: Auto,
+            }
+        );
+        assert_eq!(run(&["--", "--auto-scale"]).ceilings, Ceilings::default());
+        for (flag, value, expected) in [
+            (
+                "-i",
+                "10",
+                Ceilings {
+                    incoming: Fixed(1280),
+                    outgoing: Auto,
+                },
+            ),
+            (
+                "-o",
+                "20",
+                Ceilings {
+                    incoming: Auto,
+                    outgoing: Fixed(2560),
+                },
+            ),
+            (
+                "-i",
+                "0",
+                Ceilings {
+                    incoming: Fixed(DEFAULT_CEILING_BYTES),
+                    outgoing: Auto,
+                },
+            ),
+            (
+                "-o",
+                "0",
+                Ceilings {
+                    incoming: Auto,
+                    outgoing: Fixed(DEFAULT_CEILING_BYTES),
+                },
+            ),
+        ] {
+            assert_eq!(run(&["--auto-scale", flag, value]).ceilings, expected);
+            assert_eq!(
+                run(&[flag, value, "eth0", "--auto-scale"]).ceilings,
+                expected
+            );
+        }
+        let fixed = ["-i", "1", "-o", "0", "-i", "2"];
+        assert_eq!(
+            run(&["-i", "1", "--auto-scale", "-o", "0", "-i", "2"]).ceilings,
+            run(&fixed).ceilings,
+        );
     }
 
     #[test]
@@ -272,8 +364,8 @@ mod tests {
         assert_eq!(
             default.ceilings,
             Ceilings {
-                incoming: 1_310_720,
-                outgoing: 1_310_720
+                incoming: Fixed(1_310_720),
+                outgoing: Fixed(1_310_720),
             }
         );
         let before = run(&["-i", "20480", "-o", "5120", "eth0"]);
@@ -281,24 +373,30 @@ mod tests {
         assert_eq!(
             before.ceilings,
             Ceilings {
-                incoming: 2_621_440,
-                outgoing: 655_360
+                incoming: Fixed(2_621_440),
+                outgoing: Fixed(655_360),
             }
         );
-        assert_eq!(run(&["-i", "10", "-i", "00020"]).ceilings.incoming, 2560);
-        assert_eq!(run(&["-o", "10", "-o", "20"]).ceilings.outgoing, 2560);
+        assert_eq!(
+            run(&["-i", "10", "-i", "00020"]).ceilings.incoming,
+            Fixed(2560)
+        );
+        assert_eq!(
+            run(&["-o", "10", "-o", "20"]).ceilings.outgoing,
+            Fixed(2560)
+        );
         assert_eq!(
             run(&["-i", "10", "-o", "20", "-i", "0000"]).ceilings,
             Ceilings {
-                incoming: 1_310_720,
-                outgoing: 2560
+                incoming: Fixed(1_310_720),
+                outgoing: Fixed(2560),
             }
         );
         assert_eq!(
             run(&["-i", "10", "-o", "20", "-o", "0"]).ceilings,
             Ceilings {
-                incoming: 1280,
-                outgoing: 1_310_720
+                incoming: Fixed(1280),
+                outgoing: Fixed(1_310_720),
             }
         );
     }
@@ -317,7 +415,7 @@ mod tests {
                     } else {
                         ceilings.outgoing
                     },
-                    expected
+                    Fixed(expected)
                 );
             }
             for value in [
@@ -347,10 +445,10 @@ mod tests {
         let long_zero = "0".repeat(1000);
         assert_eq!(
             run(&["-i", &long_zero]).ceilings.incoming,
-            DEFAULT_CEILING_BYTES
+            Fixed(DEFAULT_CEILING_BYTES)
         );
         let long_one = format!("{long_zero}1");
-        assert_eq!(run(&["-i", &long_one]).ceilings.incoming, 128);
+        assert_eq!(run(&["-i", &long_one]).ceilings.incoming, Fixed(128));
         assert!(parse([OsString::from("-i"), OsString::from_vec(vec![0xff])]).is_err());
         assert!(invoke(&["-i", "bad", "-i", "1"]).is_err());
     }

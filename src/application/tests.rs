@@ -443,8 +443,8 @@ fn observed_wire(selected: usize, width: usize, height: usize, rounds: usize) ->
         &first,
         None,
         arguments::Ceilings {
-            incoming: 128,
-            outgoing: 128,
+            incoming: arguments::CeilingPolicy::Fixed(128),
+            outgoing: arguments::CeilingPolicy::Fixed(128),
         },
         0,
     )

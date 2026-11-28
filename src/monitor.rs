@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use crate::arguments::Ceilings;
+use crate::arguments::{CeilingPolicy, Ceilings};
 use crate::proc_sampler::{
     AcquisitionError, CounterOutcome, Counters, Snapshot, StartupError, StartupSelection,
     counter_outcome, natural_order,
@@ -10,6 +10,8 @@ use crate::proc_sampler::{
 
 const SECOND_NS: u64 = 1_000_000_000;
 const HISTORY_NS: u64 = 300 * SECOND_NS;
+const AUTO_DECAY_NS: u64 = 2 * SECOND_NS;
+const AUTO_MIN_CEILING: u64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewState {
@@ -39,6 +41,18 @@ pub(crate) struct DirectionView<'a> {
     pub(crate) rates: Option<Rates>,
     pub(crate) samples: &'a VecDeque<GraphSample>,
     pub(crate) ceiling: u64,
+}
+
+impl DirectionView<'_> {
+    fn unavailable(policy: CeilingPolicy) -> Self {
+        static EMPTY_SAMPLES: VecDeque<GraphSample> = VecDeque::new();
+        Self {
+            total: None,
+            rates: None,
+            samples: &EMPTY_SAMPLES,
+            ceiling: initial_ceiling(policy),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -87,13 +101,13 @@ impl Monitor {
         mut outcome: impl FnMut(&[u8]) -> CounterOutcome,
     ) -> Self {
         assert!(!startup.names.is_empty() && startup.selected < startup.names.len());
-        assert!(ceilings.incoming > 0 && ceilings.outgoing > 0);
+        assert!(initial_ceiling(ceilings.incoming) > 0 && initial_ceiling(ceilings.outgoing) > 0);
         Self {
             entries: startup
                 .names
                 .into_iter()
                 .map(|name| {
-                    let state = EntryState::from_outcome(at, outcome(&name));
+                    let state = EntryState::from_outcome(at, outcome(&name), ceilings);
                     Entry { name, state }
                 })
                 .collect(),
@@ -116,9 +130,9 @@ impl Monitor {
         for entry in &mut self.entries {
             match (&mut entry.state, outcome(&entry.name)) {
                 (EntryState::Run(run), CounterOutcome::Readable(counters)) => {
-                    run.observe(at, counters);
+                    run.observe(at, counters, self.ceilings);
                 }
-                (state, outcome) => *state = EntryState::from_outcome(at, outcome),
+                (state, outcome) => *state = EntryState::from_outcome(at, outcome, self.ceilings),
             }
         }
         for name in names {
@@ -132,7 +146,7 @@ impl Monitor {
                 index,
                 Entry {
                     name: name.to_vec(),
-                    state: EntryState::from_outcome(at, outcome(name)),
+                    state: EntryState::from_outcome(at, outcome(name), self.ceilings),
                 },
             );
             if self.pending_request.as_deref() == Some(name) {
@@ -163,23 +177,24 @@ impl Monitor {
 
     pub(crate) fn selected_view(&self) -> SelectedView<'_> {
         let entry = &self.entries[self.selected];
-        let (state, totals, incoming, outgoing) = match &entry.state {
+        let (state, incoming, outgoing) = match &entry.state {
             EntryState::Run(run) => (
                 if run.incoming.rates.is_some() {
                     ViewState::Measured
                 } else {
                     ViewState::Baseline
                 },
-                Some(run.totals),
-                &run.incoming,
-                &run.outgoing,
+                run.incoming.view(run.totals.incoming),
+                run.outgoing.view(run.totals.outgoing),
             ),
-            EntryState::Absent => (ViewState::Absent, None, &EMPTY_DIRECTION, &EMPTY_DIRECTION),
-            EntryState::ReadFailed => (
-                ViewState::ReadFailed,
-                None,
-                &EMPTY_DIRECTION,
-                &EMPTY_DIRECTION,
+            state @ (EntryState::Absent | EntryState::ReadFailed) => (
+                if matches!(state, EntryState::Absent) {
+                    ViewState::Absent
+                } else {
+                    ViewState::ReadFailed
+                },
+                DirectionView::unavailable(self.ceilings.incoming),
+                DirectionView::unavailable(self.ceilings.outgoing),
             ),
         };
         SelectedView {
@@ -187,8 +202,8 @@ impl Monitor {
             position: self.selected + 1,
             count: self.entries.len(),
             state,
-            incoming: incoming.view(totals.map(|pair| pair.incoming), self.ceilings.incoming),
-            outgoing: outgoing.view(totals.map(|pair| pair.outgoing), self.ceilings.outgoing),
+            incoming,
+            outgoing,
         }
     }
 }
@@ -205,9 +220,11 @@ enum EntryState {
 }
 
 impl EntryState {
-    fn from_outcome(at: u64, outcome: CounterOutcome) -> Self {
+    fn from_outcome(at: u64, outcome: CounterOutcome, ceilings: Ceilings) -> Self {
         match outcome {
-            CounterOutcome::Readable(counters) => Self::Run(Box::new(Run::new(at, counters))),
+            CounterOutcome::Readable(counters) => {
+                Self::Run(Box::new(Run::new(at, counters, ceilings)))
+            }
             CounterOutcome::Absent => Self::Absent,
             CounterOutcome::ReadFailed => Self::ReadFailed,
         }
@@ -230,25 +247,25 @@ struct Interval {
 }
 
 impl Run {
-    fn new(at: u64, totals: Counters) -> Self {
+    fn new(at: u64, totals: Counters, ceilings: Ceilings) -> Self {
         Self {
             baseline_at: at,
             latest_at: at,
             totals,
             intervals: VecDeque::new(),
-            incoming: Direction::default(),
-            outgoing: Direction::default(),
+            incoming: Direction::new(ceilings.incoming),
+            outgoing: Direction::new(ceilings.outgoing),
         }
     }
 
-    fn observe(&mut self, at: u64, totals: Counters) {
+    fn observe(&mut self, at: u64, totals: Counters, ceilings: Ceilings) {
         let delta = match (
             totals.incoming.checked_sub(self.totals.incoming),
             totals.outgoing.checked_sub(self.totals.outgoing),
         ) {
             (Some(incoming), Some(outgoing)) => Counters { incoming, outgoing },
             _ => {
-                *self = Self::new(at, totals);
+                *self = Self::new(at, totals, ceilings);
                 return;
             }
         };
@@ -289,19 +306,75 @@ impl Run {
     }
 }
 
-#[derive(Default)]
+fn initial_ceiling(policy: CeilingPolicy) -> u64 {
+    match policy {
+        CeilingPolicy::Fixed(ceiling) => ceiling,
+        CeilingPolicy::Auto => AUTO_MIN_CEILING,
+    }
+}
+
+enum DirectionScale {
+    Fixed(u64),
+    Auto {
+        ceiling: u64,
+        low_since: Option<u64>,
+    },
+}
+
+impl DirectionScale {
+    fn new(policy: CeilingPolicy) -> Self {
+        match policy {
+            CeilingPolicy::Fixed(ceiling) => Self::Fixed(ceiling),
+            CeilingPolicy::Auto => Self::Auto {
+                ceiling: AUTO_MIN_CEILING,
+                low_since: None,
+            },
+        }
+    }
+
+    fn ceiling(&self) -> u64 {
+        match *self {
+            Self::Fixed(ceiling) | Self::Auto { ceiling, .. } => ceiling,
+        }
+    }
+
+    fn observe(&mut self, at: u64, rate: f64) {
+        let Self::Auto { ceiling, low_since } = self else {
+            return;
+        };
+        if rate > *ceiling as f64 {
+            *ceiling = (rate.ceil() as u64)
+                .checked_next_power_of_two()
+                .unwrap_or(u64::MAX);
+            *low_since = None;
+        } else if *ceiling > AUTO_MIN_CEILING && rate <= *ceiling as f64 / 4.0 {
+            if at - *low_since.get_or_insert(at) >= AUTO_DECAY_NS {
+                *ceiling = ceiling.div_ceil(2);
+                *low_since = (rate <= *ceiling as f64 / 4.0).then_some(at);
+            }
+        } else {
+            *low_since = None;
+        }
+    }
+}
+
 struct Direction {
     rates: Option<Rates>,
     samples: VecDeque<GraphSample>,
+    scale: DirectionScale,
 }
 
-static EMPTY_DIRECTION: Direction = Direction {
-    rates: None,
-    samples: VecDeque::new(),
-};
-
 impl Direction {
+    fn new(policy: CeilingPolicy) -> Self {
+        Self {
+            rates: None,
+            samples: VecDeque::new(),
+            scale: DirectionScale::new(policy),
+        }
+    }
+
     fn record(&mut self, at: u64, current: f64, average: f64) {
+        self.scale.observe(at, current);
         self.rates = Some(Rates {
             current,
             average,
@@ -319,12 +392,12 @@ impl Direction {
         self.samples.push_back(GraphSample { at, rate: current });
     }
 
-    fn view(&self, total: Option<u64>, ceiling: u64) -> DirectionView<'_> {
+    fn view(&self, total: u64) -> DirectionView<'_> {
         DirectionView {
-            total,
+            total: Some(total),
             rates: self.rates,
             samples: &self.samples,
-            ceiling,
+            ceiling: self.scale.ceiling(),
         }
     }
 }
@@ -683,8 +756,8 @@ mod tests {
     #[test]
     fn navigation_wraps_symmetrically_preserving_views_and_global_ceilings() {
         let ceilings = Ceilings {
-            incoming: 2_621_440,
-            outgoing: 655_360,
+            incoming: CeilingPolicy::Fixed(2_621_440),
+            outgoing: CeilingPolicy::Fixed(655_360),
         };
         let names = vec![b"eth1".to_vec(), b"eth02".to_vec(), b"e\xff2".to_vec()];
         let mut monitor = Monitor::new(
@@ -704,8 +777,8 @@ mod tests {
             assert_eq!(view.name, names[index]);
             assert_eq!(view.position, index + 1);
             assert_eq!(view.count, 3);
-            assert_eq!(view.incoming.ceiling, ceilings.incoming);
-            assert_eq!(view.outgoing.ceiling, ceilings.outgoing);
+            assert_eq!(view.incoming.ceiling, 2_621_440);
+            assert_eq!(view.outgoing.ceiling, 655_360);
             assert_eq!(view.incoming.rates.unwrap().current, 5_242_880.0);
             assert_eq!(view.outgoing.rates.unwrap().current, 1_310_720.0);
             expected.push(saved(view));
@@ -741,6 +814,89 @@ mod tests {
             );
         }
         Snapshot::parse(&bytes).unwrap()
+    }
+
+    const AUTO_CEILINGS: Ceilings = Ceilings {
+        incoming: CeilingPolicy::Auto,
+        outgoing: CeilingPolicy::Auto,
+    };
+
+    #[test]
+    fn auto_scale_fits_quiet_traffic_and_recovers_without_jitter() {
+        let initial = snapshot(&[(b"eth0", 0, 0)]);
+        let mut monitor = Monitor::from_snapshot(&initial, None, AUTO_CEILINGS, 0).unwrap();
+        let mut fixed = Monitor::from_snapshot(&initial, None, Ceilings::default(), 0).unwrap();
+        assert_eq!(monitor.selected_view().incoming.ceiling, 1);
+        let mut total = 0;
+        for (second, delta, ceiling) in [
+            (1, 3, 4),
+            (2, 1025, 2048),
+            (3, 1025, 2048),
+            (4, 512, 2048),
+            (5, 513, 2048),
+            (6, 512, 2048),
+            (7, 512, 2048),
+            (8, 512, 1024),
+            (9, 4, 1024),
+            (10, 4, 1024),
+            (20, 40, 512),
+            (21, 4, 512),
+            (22, 4, 256),
+        ] {
+            total += delta;
+            observe(&mut monitor, second * SECOND_NS, total, 0);
+            observe(&mut fixed, second * SECOND_NS, total, 0);
+            let auto_view = monitor.selected_view();
+            let fixed_view = fixed.selected_view();
+            assert_eq!(auto_view.incoming.ceiling, ceiling, "second {second}");
+            assert_eq!(auto_view.outgoing.ceiling, 1);
+            assert_eq!(fixed_view.incoming.ceiling, 1_310_720);
+            assert_eq!(auto_view.incoming.rates, fixed_view.incoming.rates);
+            assert_eq!(auto_view.incoming.samples, fixed_view.incoming.samples);
+        }
+        let incoming = monitor.selected_view().incoming;
+        assert_eq!(incoming.samples[1].rate, 1025.0);
+        assert!(incoming.samples[1].rate > incoming.ceiling as f64);
+    }
+
+    #[test]
+    fn auto_scale_tracks_each_direction_and_interface_even_when_unselected() {
+        let initial = snapshot(&[(b"eth0", 0, 0), (b"eth1", 0, 0)]);
+        let mut monitor =
+            Monitor::from_snapshot(&initial, Some(b"eth0"), AUTO_CEILINGS, 0).unwrap();
+        for (second, totals) in [
+            (1, [(b"eth0".as_slice(), 1000, 4), (b"eth1", 8, 200)]),
+            (2, [(b"eth0".as_slice(), 1000, 8), (b"eth1", 16, 400)]),
+            (3, [(b"eth0".as_slice(), 1000, 12), (b"eth1", 24, 600)]),
+            (4, [(b"eth0".as_slice(), 1000, 16), (b"eth1", 32, 600)]),
+        ] {
+            monitor.observe_round(second * SECOND_NS, &Ok(snapshot(&totals)));
+        }
+        for (name, incoming, outgoing) in [(b"eth0", 512, 4), (b"eth1", 8, 256), (b"eth0", 512, 4)]
+        {
+            let view = monitor.selected_view();
+            assert_eq!(view.name, name);
+            assert_eq!(
+                (view.incoming.ceiling, view.outgoing.ceiling),
+                (incoming, outgoing)
+            );
+            monitor.forward();
+        }
+    }
+
+    #[test]
+    fn auto_scale_saturates_then_recovers_in_power_of_two_steps() {
+        let initial = snapshot(&[(b"eth0", 0, 0)]);
+        let mut monitor = Monitor::from_snapshot(&initial, None, AUTO_CEILINGS, 0).unwrap();
+        observe(&mut monitor, 1, u64::MAX, 0);
+        assert_eq!(monitor.selected_view().incoming.ceiling, u64::MAX);
+        observe(&mut monitor, SECOND_NS + 1, u64::MAX, 0);
+        observe(&mut monitor, 3 * SECOND_NS, u64::MAX, 0);
+        assert_eq!(monitor.selected_view().incoming.ceiling, u64::MAX);
+        observe(&mut monitor, 3 * SECOND_NS + 1, u64::MAX, 0);
+        assert_eq!(monitor.selected_view().incoming.ceiling, 1 << 63);
+        observe(&mut monitor, 5 * SECOND_NS + 1, u64::MAX, 0);
+        assert_eq!(monitor.selected_view().incoming.ceiling, 1 << 62);
     }
 
     #[test]

@@ -299,7 +299,7 @@ mod tests {
     use super::*;
     use std::collections::VecDeque;
 
-    use crate::arguments::Ceilings;
+    use crate::arguments::{CeilingPolicy::Fixed, Ceilings};
     use crate::monitor::{GraphSample, Monitor, Rates};
     use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
 
@@ -934,8 +934,8 @@ mod tests {
     #[test]
     fn largest_exact_totals_and_ceilings_and_overwide_rates_keep_labels() {
         let ceilings = Ceilings {
-            incoming: 18_446_744_073_709_551_488,
-            outgoing: 128,
+            incoming: Fixed(18_446_744_073_709_551_488),
+            outgoing: Fixed(128),
         };
         let mut monitor = monitor(b"eth0".to_vec(), ceilings, 0, 0);
         monitor.observe(1, [], |_| {
@@ -1070,8 +1070,8 @@ mod tests {
         let mut monitor = monitor(
             b"eth0".to_vec(),
             Ceilings {
-                incoming: 100,
-                outgoing: 100,
+                incoming: Fixed(100),
+                outgoing: Fixed(100),
             },
             0,
             0,
@@ -1175,8 +1175,8 @@ mod tests {
         let mut monitor = monitor(
             b"eth0".to_vec(),
             Ceilings {
-                incoming: 100,
-                outgoing: 100,
+                incoming: Fixed(100),
+                outgoing: Fixed(100),
             },
             0,
             0,
@@ -1229,8 +1229,8 @@ mod tests {
         let mut monitor = monitor(
             b"eth0".to_vec(),
             Ceilings {
-                incoming: 100,
-                outgoing: 100,
+                incoming: Fixed(100),
+                outgoing: Fixed(100),
             },
             0,
             0,
@@ -1275,8 +1275,8 @@ mod tests {
                 pending_request: None,
             },
             Ceilings {
-                incoming: 100,
-                outgoing: 100,
+                incoming: Fixed(100),
+                outgoing: Fixed(100),
             },
             0,
             |_| {

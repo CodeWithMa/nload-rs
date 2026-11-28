@@ -214,7 +214,7 @@ const RESTORE: &[&str] = &[
 
 #[test]
 fn explicit_and_drop_cleanup_cancel_partial_sgr_and_reset_before_screen_restoration() {
-    use crate::arguments::Ceilings;
+    use crate::arguments::{CeilingPolicy::Fixed, Ceilings};
     use crate::monitor::Monitor;
     use crate::proc_sampler::{CounterOutcome, Counters, StartupSelection};
     let mut monitor = Monitor::new(
@@ -224,8 +224,8 @@ fn explicit_and_drop_cleanup_cancel_partial_sgr_and_reset_before_screen_restorat
             pending_request: None,
         },
         Ceilings {
-            incoming: 128,
-            outgoing: 128,
+            incoming: Fixed(128),
+            outgoing: Fixed(128),
         },
         0,
         |_| {

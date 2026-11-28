@@ -526,6 +526,31 @@ fn loopback_burst() {
     }
 }
 
+#[test]
+fn auto_scale_raises_incoming_ceiling_without_changing_fixed_outgoing() {
+    let mut product = Product::spawn(60, 16, |command, _, _| {
+        command.args(["--auto-scale", "-o", "1", "lo"]);
+    });
+    let baseline = product.frame(60, 16, |rows| rows[1] == "Waiting for rate sample");
+    assert!(baseline[2].starts_with("Incoming: (ceiling "));
+    assert_eq!(baseline[9], "Outgoing: (ceiling 1.00 kBit/s)");
+
+    loopback_burst();
+    let measured = product.frame(60, 16, |rows| rows[2] != baseline[2]);
+    assert!(measured[2].starts_with("Incoming: (ceiling "));
+    assert_eq!(measured[9], baseline[9]);
+    assert!(
+        measured[3..9]
+            .iter()
+            .flat_map(|row| row.chars())
+            .any(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph))
+    );
+
+    product.send(b"q");
+    assert!(product.finish(0, true).is_empty());
+    product.assert_cleanup();
+}
+
 fn colored_product() -> Product {
     let mut product = Product::spawn(60, 16, |command, _, _| {
         command.args(["--color", "-i", "1", "-o", "1", "lo"]);

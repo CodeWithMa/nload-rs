@@ -41,8 +41,15 @@ requested one when it first appears. New interfaces become available as they
 appear; disconnected interfaces stay in the list and are marked unavailable.
 
 Use `-i VALUE` and `-o VALUE` to set the incoming and outgoing graph ceilings.
-Both default to 10,240 kBit/s (10 MBit/s in binary units). Run
-`nload-rs --help` for all options.
+Both default to 10,240 kBit/s (10 MBit/s in binary units).
+
+Use `--auto-scale` to adjust each graph independently. The displayed ceiling
+rises immediately with spikes and falls in steps after traffic stays low.
+Older spikes may clip as the ceiling falls, but statistics are unchanged.
+
+An explicit `-i` or `-o` keeps that direction fixed, regardless of option order.
+For example, `nload-rs --auto-scale -o 0 lo` auto-scales incoming traffic and
+keeps outgoing traffic at the default ceiling. Run `nload-rs --help` for all options.
 
 Use a terminal at least 60×16 with UTF-8 and a font that renders Braille.
 `TERM` must be nonempty and neither `dumb` nor `linux`. `--color` requires

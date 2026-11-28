@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn os_invocation_to_startup_preserves_identity_and_full_membership() {
-        use crate::arguments::{self, Invocation};
+        use crate::arguments::{self, CeilingPolicy::Fixed, Invocation};
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
@@ -645,8 +645,8 @@ mod tests {
                 startup.names,
                 [b"-eth0".to_vec(), b"e\xff2".to_vec(), b"lo".to_vec()]
             );
-            assert_eq!(config.ceilings.incoming, 2_621_440);
-            assert_eq!(config.ceilings.outgoing, 1_310_720);
+            assert_eq!(config.ceilings.incoming, Fixed(2_621_440));
+            assert_eq!(config.ceilings.outgoing, Fixed(1_310_720));
         }
     }
 

@@ -290,40 +290,13 @@ mod tests {
             }
         );
         assert_eq!(run(&["--", "--auto-scale"]).ceilings, Ceilings::default());
-        for (flag, value, expected) in [
-            (
-                "-i",
-                "10",
-                Ceilings {
-                    incoming: Fixed(1280),
-                    outgoing: Auto,
-                },
-            ),
-            (
-                "-o",
-                "20",
-                Ceilings {
-                    incoming: Auto,
-                    outgoing: Fixed(2560),
-                },
-            ),
-            (
-                "-i",
-                "0",
-                Ceilings {
-                    incoming: Fixed(DEFAULT_CEILING_BYTES),
-                    outgoing: Auto,
-                },
-            ),
-            (
-                "-o",
-                "0",
-                Ceilings {
-                    incoming: Auto,
-                    outgoing: Fixed(DEFAULT_CEILING_BYTES),
-                },
-            ),
+        for (flag, value, incoming, outgoing) in [
+            ("-i", "10", Fixed(1280), Auto),
+            ("-o", "20", Auto, Fixed(2560)),
+            ("-i", "0", Fixed(DEFAULT_CEILING_BYTES), Auto),
+            ("-o", "0", Auto, Fixed(DEFAULT_CEILING_BYTES)),
         ] {
+            let expected = Ceilings { incoming, outgoing };
             assert_eq!(run(&["--auto-scale", flag, value]).ceilings, expected);
             assert_eq!(
                 run(&[flag, value, "eth0", "--auto-scale"]).ceilings,

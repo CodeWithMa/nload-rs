@@ -43,11 +43,9 @@ appear; disconnected interfaces stay in the list and are marked unavailable.
 Use `-i VALUE` and `-o VALUE` to set the incoming and outgoing graph ceilings.
 Both default to 10,240 kBit/s (10 MBit/s in binary units).
 
-Use `--auto-scale` to adapt each graph to its interface and direction.
-The ceiling rises as soon as a sample exceeds it, then halves one step at a
-time after at least two seconds of measured traffic at or below a quarter of
-the ceiling. Each graph shows its current ceiling. Older spikes may clip as
-the ceiling falls, but the traffic statistics are unchanged.
+Use `--auto-scale` to adjust each graph independently. The displayed ceiling
+rises immediately with spikes and falls in steps after traffic stays low.
+Older spikes may clip as the ceiling falls, but statistics are unchanged.
 
 An explicit `-i` or `-o` keeps that direction fixed, regardless of option order.
 For example, `nload-rs --auto-scale -o 0 lo` auto-scales incoming traffic and

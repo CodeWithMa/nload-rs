@@ -50,7 +50,7 @@ impl DirectionView<'_> {
             total: None,
             rates: None,
             samples: &EMPTY_SAMPLES,
-            ceiling: initial_ceiling(policy),
+            ceiling: DirectionScale::new(policy).ceiling(),
         }
     }
 }
@@ -101,7 +101,8 @@ impl Monitor {
         mut outcome: impl FnMut(&[u8]) -> CounterOutcome,
     ) -> Self {
         assert!(!startup.names.is_empty() && startup.selected < startup.names.len());
-        assert!(initial_ceiling(ceilings.incoming) > 0 && initial_ceiling(ceilings.outgoing) > 0);
+        assert!(!matches!(ceilings.incoming, CeilingPolicy::Fixed(0)));
+        assert!(!matches!(ceilings.outgoing, CeilingPolicy::Fixed(0)));
         Self {
             entries: startup
                 .names
@@ -306,13 +307,6 @@ impl Run {
     }
 }
 
-fn initial_ceiling(policy: CeilingPolicy) -> u64 {
-    match policy {
-        CeilingPolicy::Fixed(ceiling) => ceiling,
-        CeilingPolicy::Auto => AUTO_MIN_CEILING,
-    }
-}
-
 enum DirectionScale {
     Fixed(u64),
     Auto {
@@ -347,13 +341,11 @@ impl DirectionScale {
                 .checked_next_power_of_two()
                 .unwrap_or(u64::MAX);
             *low_since = None;
-        } else if *ceiling > AUTO_MIN_CEILING && rate <= *ceiling as f64 / 4.0 {
-            if at - *low_since.get_or_insert(at) >= AUTO_DECAY_NS {
-                *ceiling = ceiling.div_ceil(2);
-                *low_since = (rate <= *ceiling as f64 / 4.0).then_some(at);
-            }
-        } else {
+        } else if *ceiling == AUTO_MIN_CEILING || rate > *ceiling as f64 / 4.0 {
             *low_since = None;
+        } else if at - *low_since.get_or_insert(at) >= AUTO_DECAY_NS {
+            *ceiling = ceiling.div_ceil(2);
+            *low_since = (rate <= *ceiling as f64 / 4.0).then_some(at);
         }
     }
 }
